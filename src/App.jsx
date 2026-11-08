@@ -99,7 +99,6 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // تنظيف تلقائي لدليل الزبائن من الحركات الإدارية السابقة
   const [customers, setCustomers] = useState(() => {
     const saved = localStorage.getItem('tb_customers');
     if (saved) {
@@ -181,9 +180,18 @@ export default function App() {
     showNotification('تم حذف المحفظة بنجاح');
   };
 
-  // تحديث فوري يجبر React على الـ Re-render اللحظي
   const handleRecordDebtSale = (debtSaleData) => {
-    setSalesHistory(prev => [debtSaleData, ...prev]);
+    const saleUSD = debtSaleData.currency === 'LBP' ? (parseFloat(debtSaleData.sellingPrice) / exchangeRate) : parseFloat(debtSaleData.sellingPrice);
+    const costUSD = parseFloat(debtSaleData.costUSD || 0);
+    const profitUSD = debtSaleData.profitUSD !== undefined ? parseFloat(debtSaleData.profitUSD) : Math.max(0, saleUSD - costUSD);
+
+    const recordWithProfit = {
+      ...debtSaleData,
+      profitUSD: parseFloat(profitUSD.toFixed(2)),
+      costUSD: parseFloat(costUSD.toFixed(2)),
+      date: debtSaleData.date || new Date().toISOString()
+    };
+    setSalesHistory(prev => [recordWithProfit, ...prev]);
   };
 
   const handleRecordWalletTx = (walletId, tx) => {
@@ -263,25 +271,58 @@ export default function App() {
         itemName: `سنة أيام Alfa #${cycleCount}`,
         sellingPrice: tx.amount,
         currency: tx.currency || 'LBP',
-        costUSD: parseFloat(tx.walletDeduction || 86.5),
+        costUSD: parseFloat((tx.costUSD !== undefined ? tx.costUSD : (tx.walletDeduction || 86.5)).toFixed(2)),
+        profitUSD: parseFloat((tx.profitUSD !== undefined ? tx.profitUSD : 0).toFixed(2)),
         customerName: tx.customerName || 'عام',
+        isDebt: tx.isDebt || false,
+        paymentType: tx.paymentType || 'cash',
         date: new Date().toISOString()
       };
       setSalesHistory(prev => [yearSaleRecord, ...prev]);
-      showNotification(`تم تسجيل دورة سنة أيام #${cycleCount}`, 'خُصم $86.5 من المحفظة وأُضيف $73.5 للشريحة');
+
+      if (tx.remainingDebt && parseFloat(tx.remainingDebt) > 0) {
+        setDebts(prev => [{
+          id: Date.now().toString(),
+          category: tx.customerType || 'customers',
+          name: tx.customerName || 'عميل',
+          amount: parseFloat(tx.remainingDebt),
+          currency: tx.currency || 'LBP',
+          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          paid: false,
+          notes: tx.itemName || 'متبقي بيع سنة أيام',
+          history: [{
+            id: `tx_${Date.now()}`,
+            date: new Date().toISOString(),
+            type: 'debt',
+            amount: parseFloat(tx.remainingDebt),
+            currency: tx.currency || 'LBP',
+            notes: 'دين بيع سنة أيام'
+          }]
+        }, ...prev]);
+      }
+
+      showNotification(`تم تسجيل دورة سنة أيام #${cycleCount}`, 'خُصم من المحفظة وأُضيف المردود للشريحة');
     } else if (tx.type === 'sale') {
+      const rawSaleUSD = tx.currency === 'LBP' ? (parseFloat(tx.amount) / exchangeRate) : parseFloat(tx.amount);
+      const costUSDVal = parseFloat(tx.costUSD || 0);
+      const computedProfit = tx.profitUSD !== undefined ? parseFloat(tx.profitUSD) : Math.max(0, rawSaleUSD - costUSDVal);
+
       const saleRecord = {
         id: `sale_${Date.now()}`,
         type: 'wallet_sale',
         title: tx.itemName,
         itemName: tx.itemName,
         sellingPrice: tx.amount,
-        costUSD: tx.costUSD || 0,
+        costUSD: costUSDVal,
+        profitUSD: parseFloat(computedProfit.toFixed(2)),
         currency: tx.currency || 'USD',
         customerName: tx.customerName || 'عام',
         customerPhone: tx.customerPhone || '',
         customerAddress: tx.customerAddress || '',
         walletId: walletId,
+        isDebt: tx.isDebt || false,
+        paymentType: tx.paymentType || 'cash',
+        remainingDebt: tx.remainingDebt || 0,
         date: new Date().toISOString()
       };
       setSalesHistory(prev => [saleRecord, ...prev]);
@@ -327,6 +368,7 @@ export default function App() {
     }
   };
 
+  // معالجة بيع حصص ALFA GIFT مع سداد ديون المحافظ التراكمي (FIFO)
   const handleExecuteAlfaGiftSale = ({ simId, selectedBatchId, deductUSD, lockedLineId, totalGB, recipients, exchangeRate }) => {
     if (simId) {
       setSims(prevSims => prevSims.map(sim => {
@@ -392,85 +434,54 @@ export default function App() {
     }));
 
     const targetLine = lines.find(l => l.id === lockedLineId);
-    const lineLabel = targetLine ? `خط #${targetLine.slotNumber || 1} (${targetLine.phoneNumber || targetLine.number || ''})` : 'خط مسكر';
+    const lineLabel = targetLine ? `خط #${targetLine.slotNumber || 1}` : 'خط';
 
-    const totalCollectedUSD = recipients.reduce((sum, r) => {
-      const val = parseFloat(r.price) || 0;
-      return sum + (r.currency === 'LBP' ? val / exchangeRate : val);
-    }, 0);
-
-    const matchingDebts = debts.filter(d => !d.paid && d.category === 'boxes' && d.targetLineId === lockedLineId);
-    let totalRealCashCost = 0;
-
-    if (matchingDebts.length > 0) {
-      let availableCashToPay = totalCollectedUSD;
-      const settledDebtIds = [];
-      const walletRefunds = {};
-
-      matchingDebts.forEach(d => {
-        const debtAmt = parseFloat(d.amount);
-        totalRealCashCost += debtAmt;
-        if (availableCashToPay >= debtAmt) {
-          availableCashToPay -= debtAmt;
-          settledDebtIds.push(d.id);
-          walletRefunds[d.sourceWalletId] = (walletRefunds[d.sourceWalletId] || 0) + debtAmt;
-        }
-      });
-
-      if (Object.keys(walletRefunds).length > 0) {
-        setSources(prev => prev.map(s => {
-          if (walletRefunds[s.id]) {
-            const refund = walletRefunds[s.id];
-            const updatedUSD = parseFloat(((parseFloat(s.balanceUSD ?? s.balance ?? 0)) + refund).toFixed(2));
-            const returnTx = {
-              id: `tx_return_${Date.now()}_${s.id}`,
-              type: 'deposit',
-              itemName: `استرداد تكلفة كروت ${lineLabel} من مبيع الحصص`,
-              amount: refund,
-              currency: 'USD',
-              balanceAfterUSD: updatedUSD,
-              date: new Date().toISOString()
-            };
-            return {
-              ...s,
-              balanceUSD: updatedUSD,
-              balance: updatedUSD,
-              ledger: [returnTx, ...(s.ledger || [])]
-            };
-          }
-          return s;
-        }));
-
-        setDebts(prev => prev.map(d => settledDebtIds.includes(d.id) ? { ...d, paid: true } : d));
-        showNotification('تم استرداد تكاليف الكروت للمحافظ', `سُددت ديون الصناديق للخط بالكامل`);
-      }
-    }
-
-    let remainingCashCostToRecover = totalRealCashCost;
+    // سداد ديون المحافظ التراكمي (FIFO)
+    let localDebts = debts.map(d => ({ ...d, history: [...(d.history || [])] }));
+    const walletRefundMap = {};
+    const salesToAppend = [];
 
     recipients.forEach((rec, idx) => {
       const saleVal = parseFloat(rec.price) || 0;
       const saleUSD = rec.currency === 'LBP' ? (saleVal / exchangeRate) : saleVal;
 
+      let remSaleUSD = saleUSD;
       let costAssigned = 0;
-      let netProfit = 0;
 
-      if (remainingCashCostToRecover > 0) {
-        if (saleUSD <= remainingCashCostToRecover) {
-          costAssigned = saleUSD;
-          remainingCashCostToRecover = parseFloat((remainingCashCostToRecover - saleUSD).toFixed(2));
-          netProfit = 0;
-        } else {
-          costAssigned = remainingCashCostToRecover;
-          netProfit = parseFloat((saleUSD - remainingCashCostToRecover).toFixed(2));
-          remainingCashCostToRecover = 0;
+      // فرز ديون المحافظ المرتبطة بالخط من الأقدم للأحدث (FIFO)
+      const lineDebts = localDebts
+        .filter(d => !d.paid && d.category === 'boxes' && d.targetLineId === lockedLineId)
+        .sort((a, b) => (new Date(a.createdAt || a.dueDate || 0)) - (new Date(b.createdAt || b.dueDate || 0)));
+
+      for (const d of lineDebts) {
+        if (remSaleUSD <= 0) break;
+        const dRem = parseFloat(d.amount) || 0;
+        if (dRem <= 0) continue;
+
+        const pay = Math.min(remSaleUSD, dRem);
+        remSaleUSD -= pay;
+        costAssigned += pay;
+
+        d.amount = parseFloat((dRem - pay).toFixed(2));
+        if (d.amount <= 0.01) d.paid = true;
+
+        d.history.push({
+          id: `tx_pay_${Date.now()}_${idx}`,
+          date: new Date().toISOString(),
+          type: 'payment',
+          amount: pay,
+          currency: 'USD',
+          notes: `سداد من مبيع حصة ${lineLabel} (${rec.name})`
+        });
+
+        if (d.sourceWalletId) {
+          walletRefundMap[d.sourceWalletId] = (walletRefundMap[d.sourceWalletId] || 0) + pay;
         }
-      } else {
-        costAssigned = 0;
-        netProfit = parseFloat(saleUSD.toFixed(2));
       }
 
-      const giftRecord = {
+      const netProfit = Math.max(0, parseFloat((saleUSD - costAssigned).toFixed(2)));
+
+      salesToAppend.push({
         id: `gift_sale_${Date.now()}_${idx}`,
         type: 'alfa_gift',
         operator: 'alfa',
@@ -483,16 +494,12 @@ export default function App() {
         customerName: rec.name.trim(),
         customerPhone: rec.phone?.trim() || '',
         date: new Date().toISOString()
-      };
+      });
 
-      setSalesHistory(prev => [giftRecord, ...prev]);
-
-      const excludedAutoNames = ['تغذية خط مسكر', 'حركة مباشرة', 'عام'];
       const rawRecName = (rec.name || '').trim();
-      if (rawRecName && !excludedAutoNames.includes(rawRecName.toLowerCase())) {
+      if (rawRecName && !['تغذية خط مسكر', 'حركة مباشرة', 'عام'].includes(rawRecName.toLowerCase())) {
         setCustomers(prev => {
-          const exists = prev.some(c => c.name.toLowerCase() === rawRecName.toLowerCase());
-          if (!exists) {
+          if (!prev.some(c => c.name.toLowerCase() === rawRecName.toLowerCase())) {
             return [{
               id: Date.now().toString() + idx,
               name: rawRecName,
@@ -505,7 +512,37 @@ export default function App() {
       }
     });
 
-    showNotification('تم تثبيت خدمة ALFA GIFT', `سُددت الكروت وحُسبت الأرباح الحقيقية بدقة`);
+    setSalesHistory(prev => [...salesToAppend, ...prev]);
+    setDebts(localDebts);
+
+    if (Object.keys(walletRefundMap).length > 0) {
+      setSources(prev => prev.map(s => {
+        if (walletRefundMap[s.id]) {
+          const refund = walletRefundMap[s.id];
+          const curUSD = parseFloat(s.balanceUSD ?? s.balance ?? 0);
+          const updatedUSD = parseFloat((curUSD + refund).toFixed(2));
+          const returnTx = {
+            id: `tx_return_${Date.now()}_${s.id}`,
+            type: 'deposit',
+            itemName: `استرداد تكلفة كروت ${lineLabel} من مبيع الحصص`,
+            amount: refund,
+            currency: 'USD',
+            balanceAfterUSD: updatedUSD,
+            date: new Date().toISOString()
+          };
+          return {
+            ...s,
+            balanceUSD: updatedUSD,
+            balance: updatedUSD,
+            ledger: [returnTx, ...(s.ledger || [])]
+          };
+        }
+        return s;
+      }));
+      showNotification('تم استرداد مبالغ الكروت للمحافظ', `سُددت ديون الصناديق بالتتابع بنجاح`);
+    }
+
+    showNotification('تم تثبيت خدمة ALFA GIFT', `سُددت المحافظ وحُسبت الأرباح بدقة`);
   };
 
   const handleConfirmSale = (confirmedData) => {
@@ -539,18 +576,19 @@ export default function App() {
       return s;
     }));
 
-    const excludedAutoNames = ['تغذية خط مسكر', 'حركة مباشرة', 'عام'];
-    const confirmedName = (confirmedData.customerName || '').trim();
-    if (confirmedName && !excludedAutoNames.includes(confirmedName.toLowerCase())) {
-      const exists = customers.some(c => c.name.toLowerCase() === confirmedName.toLowerCase());
-      if (!exists) {
-        setCustomers(prev => [{
-          id: Date.now().toString(),
-          name: confirmedName,
-          phone: confirmedData.customerPhone || '',
-          address: confirmedData.customerAddress || ''
-        }, ...prev]);
-      }
+    const cleanCustName = (confirmedData.customerName || '').trim();
+    if (cleanCustName && !['تغذية خط مسكر', 'حركة مباشرة', 'عام'].includes(cleanCustName.toLowerCase())) {
+      setCustomers(prev => {
+        if (!prev.some(c => c.name.toLowerCase() === cleanCustName.toLowerCase())) {
+          return [{
+            id: Date.now().toString(),
+            name: cleanCustName,
+            phone: confirmedData.customerPhone || '',
+            address: confirmedData.customerAddress || ''
+          }, ...prev];
+        }
+        return prev;
+      });
     }
 
     if (confirmedData.remainingDebt && parseFloat(confirmedData.remainingDebt) > 0) {
@@ -574,14 +612,154 @@ export default function App() {
       }, ...prev]);
     }
 
+    const saleUSDVal = confirmedData.currency === 'LBP' ? (parseFloat(confirmedData.sellingPrice || confirmedData.amount) / exchangeRate) : parseFloat(confirmedData.sellingPrice || confirmedData.amount);
+    const costUSDVal = parseFloat(confirmedData.costUSD || 0);
+    const profitUSDVal = confirmedData.profitUSD !== undefined ? parseFloat(confirmedData.profitUSD) : Math.max(0, saleUSDVal - costUSDVal);
+
     const saleWithDate = {
       ...confirmedData,
+      profitUSD: parseFloat(profitUSDVal.toFixed(2)),
+      costUSD: parseFloat(costUSDVal.toFixed(2)),
       date: confirmedData.date || new Date().toISOString()
     };
 
     setSalesHistory(prev => [saleWithDate, ...prev]);
     setModalOpen(false);
     showNotification('تمت عملية البيع بنجاح', confirmedData.itemName);
+  };
+
+  // سداد ديون المحافظ التراكمي عند بيع حصة مباشرة من صفحة الخطوط
+  const handleRecordSaleFromLine = (saleItem) => {
+    const saleUSDVal = saleItem.currency === 'LBP' ? (parseFloat(saleItem.sellingPrice) / exchangeRate) : parseFloat(saleItem.sellingPrice);
+    const targetLineId = saleItem.targetLineId || saleItem.lockedLineId;
+
+    let costAssigned = 0;
+    let profitUSDVal = saleUSDVal;
+    let walletRefundMap = {};
+
+    if (targetLineId) {
+      let remSale = saleUSDVal;
+      const targetLine = lines.find(l => l.id === targetLineId);
+      const lineLabel = targetLine ? `خط #${targetLine.slotNumber || 1}` : 'خط';
+
+      setDebts(prevDebts => {
+        const matchingDebts = prevDebts
+          .filter(d => !d.paid && d.category === 'boxes' && d.targetLineId === targetLineId)
+          .sort((a, b) => (new Date(a.createdAt || a.dueDate || 0)) - (new Date(b.createdAt || b.dueDate || 0)));
+
+        if (matchingDebts.length === 0) return prevDebts;
+
+        return prevDebts.map(d => {
+          if (!d.paid && d.category === 'boxes' && d.targetLineId === targetLineId && remSale > 0) {
+            const dRem = parseFloat(d.amount) || 0;
+            if (dRem > 0) {
+              const pay = Math.min(remSale, dRem);
+              remSale -= pay;
+              costAssigned += pay;
+
+              if (d.sourceWalletId) {
+                walletRefundMap[d.sourceWalletId] = (walletRefundMap[d.sourceWalletId] || 0) + pay;
+              }
+
+              const newAmount = parseFloat((dRem - pay).toFixed(2));
+              return {
+                ...d,
+                amount: newAmount,
+                paid: newAmount <= 0.01,
+                history: [
+                  ...(d.history || []),
+                  {
+                    id: `tx_pay_${Date.now()}`,
+                    date: new Date().toISOString(),
+                    type: 'payment',
+                    amount: pay,
+                    currency: 'USD',
+                    notes: `سداد من مبيع حصة ${lineLabel}`
+                  }
+                ]
+              };
+            }
+          }
+          return d;
+        });
+      });
+
+      profitUSDVal = Math.max(0, parseFloat((saleUSDVal - costAssigned).toFixed(2)));
+
+      if (Object.keys(walletRefundMap).length > 0) {
+        setSources(prev => prev.map(s => {
+          if (walletRefundMap[s.id]) {
+            const refund = walletRefundMap[s.id];
+            const curUSD = parseFloat(s.balanceUSD ?? s.balance ?? 0);
+            const updatedUSD = parseFloat((curUSD + refund).toFixed(2));
+            return {
+              ...s,
+              balanceUSD: updatedUSD,
+              balance: updatedUSD,
+              ledger: [
+                {
+                  id: `tx_return_${Date.now()}_${s.id}`,
+                  type: 'deposit',
+                  itemName: `استرداد تكلفة حصة من ${lineLabel}`,
+                  amount: refund,
+                  currency: 'USD',
+                  balanceAfterUSD: updatedUSD,
+                  date: new Date().toISOString()
+                },
+                ...(s.ledger || [])
+              ]
+            };
+          }
+          return s;
+        }));
+      }
+    }
+
+    const saleWithDate = {
+      ...saleItem,
+      costUSD: parseFloat(costAssigned.toFixed(2)),
+      profitUSD: parseFloat(profitUSDVal.toFixed(2)),
+      date: saleItem.date || new Date().toISOString()
+    };
+    setSalesHistory(prev => [saleWithDate, ...prev]);
+
+    if (saleItem.isDebt) {
+      setDebts(prev => [{
+        id: Date.now().toString(),
+        category: 'customers',
+        name: saleItem.customerName || 'عميل',
+        amount: parseFloat(saleItem.sellingPrice),
+        currency: saleItem.currency || 'USD',
+        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        paid: false,
+        notes: saleItem.itemName,
+        history: [{
+          id: `tx_${Date.now()}`,
+          date: new Date().toISOString(),
+          type: 'debt',
+          amount: parseFloat(saleItem.sellingPrice),
+          currency: saleItem.currency || 'USD',
+          notes: saleItem.itemName
+        }]
+      }, ...prev]);
+    }
+
+    const cleanName = (saleItem.customerName || '').trim();
+    if (cleanName && !['تغذية خط مسكر', 'عام', 'حركة مباشرة'].includes(cleanName.toLowerCase())) {
+      setCustomers(prev => {
+        if (!prev.some(c => c.name?.toLowerCase() === cleanName.toLowerCase())) {
+          return [{
+            id: Date.now().toString(),
+            name: cleanName,
+            phone: saleItem.customerPhone || '',
+            address: ''
+          }, ...prev];
+        }
+        return prev;
+      });
+    }
+
+    showNotification('تم تسجيل حصة المشترك بنجاح', saleItem.itemName);
   };
 
   const totalBalanceUSD = sources.reduce((acc, curr) => acc + (parseFloat(curr.balanceUSD ?? curr.balance ?? 0)), 0).toFixed(2);
@@ -618,7 +796,6 @@ export default function App() {
       {/* هيدر النظام المباشر والحيوي للموبايل */}
       <div style={{ position: 'sticky', top: 0, zIndex: 90, background: 'var(--bg-card)', borderBottom: '1px solid var(--border-color)', backdropFilter: 'blur(12px)' }}>
 
-        {/* شريط الشعار والاسم مع النبض الحي ودعم اللوغو المخصص */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {brandConfig?.logo ? (
@@ -668,10 +845,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* سطر سعر الصرف والمحافظ وأزرار الملاحة الحية */}
         <div style={{ maxWidth: '440px', margin: '0 auto', padding: '0 14px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
 
-          {/* سعر الصرف مع رادار مباشر */}
           <div
             className="mobile-btn"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-card-sub)', padding: '5px 10px', borderRadius: '12px', border: '1px solid var(--border-color)', cursor: 'pointer' }}
@@ -700,17 +875,13 @@ export default function App() {
               </span>
             )}
 
-            {/* نقطة الرادار الخضراء المستمرة */}
             <span style={{ position: 'relative', width: '8px', height: '8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
               <span className="live-radar" style={{ position: 'absolute', width: '100%', height: '100%', borderRadius: '50%', background: '#10B981' }}></span>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', display: 'inline-block' }}></span>
             </span>
           </div>
 
-          {/* شريط الأزرار المتفاعلة ذاتياً */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-
-            {/* زر الثيم المتمايل */}
             <button
               onClick={toggleTheme}
               className="mobile-btn"
@@ -731,7 +902,6 @@ export default function App() {
               </span>
             </button>
 
-            {/* كبسولة المحافظ المتوهجة بالنيون */}
             <button
               onClick={() => setCurrentTab('wallets')}
               className="mobile-btn live-wallet"
@@ -753,7 +923,6 @@ export default function App() {
               <span>المحافظ (${totalBalanceUSD})</span>
             </button>
 
-            {/* زر العمليات مع نبض القائمة */}
             <button
               onClick={() => setCurrentTab('transactions')}
               className="mobile-btn"
@@ -765,7 +934,6 @@ export default function App() {
               </span>
             </button>
 
-            {/* زر الجرد مع صعود الشارت */}
             <button
               onClick={() => setCurrentTab('analytics')}
               className="mobile-btn"
@@ -777,7 +945,6 @@ export default function App() {
               </span>
             </button>
 
-            {/* زر الزبائن مع نبض الأشخاص */}
             <button
               onClick={() => setCurrentTab('customers')}
               className="mobile-btn"
@@ -789,7 +956,6 @@ export default function App() {
               </span>
             </button>
 
-            {/* زر الأدوات مع اهتزاز المفتاح */}
             <button
               onClick={() => setShowToolsModal(true)}
               className="mobile-btn"
@@ -801,7 +967,6 @@ export default function App() {
               </span>
             </button>
 
-            {/* زر الإعدادات مع دوران المسنن */}
             <button
               onClick={() => setShowSettingsModal(true)}
               className="mobile-btn"
@@ -816,7 +981,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* تم إزالة key={currentTab} لحل تجميد الرندر وضمان التحديث اللحظي للأرقام */}
       <main className="animate-tab-enter" style={{ padding: '14px', maxWidth: '440px', margin: '0 auto' }}>
         <ExpiryAlertBanner lines={lines} onNavigate={(tab) => setCurrentTab(tab)} />
 
@@ -914,35 +1078,7 @@ export default function App() {
             onAddLine={(l) => setLines([l, ...lines])}
             onUpdateLine={(id, updater) => setLines(lines.map(l => l.id === id ? updater(l) : l))}
             onDeleteLine={(id) => setLines(lines.filter(l => l.id !== id))}
-            onRecordSaleFromLine={(saleItem) => {
-              const saleWithDate = {
-                ...saleItem,
-                date: saleItem.date || new Date().toISOString()
-              };
-              setSalesHistory(prev => [saleWithDate, ...prev]);
-
-              if (saleItem.isDebt) {
-                setDebts(prev => [{
-                  id: Date.now().toString(),
-                  category: 'customers',
-                  name: saleItem.customerName,
-                  amount: saleItem.sellingPrice,
-                  currency: saleItem.currency,
-                  dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                  paid: false,
-                  notes: saleItem.itemName,
-                  history: [{
-                    id: `tx_${Date.now()}`,
-                    date: new Date().toISOString(),
-                    type: 'debt',
-                    amount: saleItem.sellingPrice,
-                    currency: saleItem.currency,
-                    notes: saleItem.itemName
-                  }]
-                }, ...prev]);
-              }
-              showNotification('تم تسجيل حصة المشترك بنجاح', saleItem.itemName);
-            }}
+            onRecordSaleFromLine={handleRecordSaleFromLine}
             exchangeRate={exchangeRate}
           />
         )}
@@ -958,7 +1094,6 @@ export default function App() {
           />
         )}
 
-        {/* تم تمرير الديون وهوية المتجر إلى تبويب الجرد لتصدير الفواتير والتقارير الملونة بدقة */}
         {currentTab === 'analytics' && (
           <Analytics
             salesHistory={salesHistory}

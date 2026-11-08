@@ -12,16 +12,42 @@ export default function Analytics({
   brandConfig = {},
   exchangeRate = 89500
 }) {
-  const [period, setPeriod] = useState('weekly'); // 'weekly' | 'monthly'
+  const [period, setPeriod] = useState('weekly'); // 'daily' | 'weekly' | 'monthly' | 'yearly'
 
-  // 1. حساب إجمالي المبيعات والأرباح الفعلية
+  const toUSD = (amount, currency) => {
+    const val = parseFloat(amount) || 0;
+    return currency === 'LBP' ? val / exchangeRate : val;
+  };
+
+  // 1. فلترة المبيعات بدقة طبقاً للفترة المختارة
+  const now = new Date();
+  const filteredSales = salesHistory.filter(item => {
+    if (!item.date) return false;
+    const itemDate = new Date(item.date);
+    if (isNaN(itemDate.getTime())) return false;
+
+    if (period === 'daily') {
+      return itemDate.toDateString() === now.toDateString();
+    }
+    if (period === 'weekly') {
+      const diffDays = Math.floor((now - itemDate) / (1000 * 60 * 60 * 24));
+      return diffDays >= 0 && diffDays < 7;
+    }
+    if (period === 'monthly') {
+      return itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
+    }
+    if (period === 'yearly') {
+      return itemDate.getFullYear() === now.getFullYear();
+    }
+    return true;
+  });
+
+  // حساب الإجماليات للفترة المحددة
   let totalSalesUSD = 0;
   let totalProfitsUSD = 0;
 
-  salesHistory.forEach((item) => {
-    const sale = parseFloat(item.sellingPrice) || 0;
-    const isLBP = item.currency === 'LBP';
-    const saleInUSD = isLBP ? sale / exchangeRate : sale;
+  filteredSales.forEach((item) => {
+    const saleInUSD = toUSD(item.sellingPrice, item.currency);
     const profitInUSD = item.profitUSD !== undefined
       ? parseFloat(item.profitUSD) || 0
       : Math.max(0, saleInUSD - (parseFloat(item.costUSD) || 0));
@@ -30,91 +56,112 @@ export default function Analytics({
     totalProfitsUSD += profitInUSD;
   });
 
-  // حساب إجمالي الديون القائمة
-  const totalDebtsUSD = debts.filter(d => !d.paid).reduce((sum, d) => {
-    const amt = parseFloat(d.amount) || 0;
-    return sum + (d.currency === 'LBP' ? amt / exchangeRate : amt);
-  }, 0);
-
-  // حساب إجمالي سيولة الصناديق والمحافظ
+  const totalDebtsUSD = debts.filter(d => !d.paid).reduce((sum, d) => sum + toUSD(d.amount, d.currency), 0);
   const totalWalletsUSD = sources.reduce((sum, s) => sum + (parseFloat(s.balanceUSD ?? s.balance ?? 0)), 0);
 
-  // 2. تجميع الأرباح اليومية الفعلية بناءً على التواريخ المسجلة في العمليات
+  // 2. تجميع بيانات الرسم البياني حسب الفترة
   const arabicDays = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  const arabicMonths = ['كانون 2', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين 1', 'تشرين 2', 'كانون 1'];
 
-  const getDynamicWeeklyData = () => {
-    const last7Days = [];
-    const now = new Date();
+  // مخطط اليومي (موزع على ساعات اليوم)
+  const getDailyData = () => {
+    const hoursSlots = [
+      { name: 'صباحاً', profit: 0, minHour: 0, maxHour: 12 },
+      { name: 'ظهراً', profit: 0, minHour: 12, maxHour: 16 },
+      { name: 'عصراً', profit: 0, minHour: 16, maxHour: 20 },
+      { name: 'مساءً', profit: 0, minHour: 20, maxHour: 24 }
+    ];
 
+    filteredSales.forEach(item => {
+      const d = new Date(item.date);
+      const h = d.getHours();
+      const p = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, toUSD(item.sellingPrice, item.currency) - (parseFloat(item.costUSD) || 0));
+      const slot = hoursSlots.find(s => h >= s.minHour && h < s.maxHour);
+      if (slot) slot.profit = parseFloat((slot.profit + p).toFixed(2));
+    });
+
+    return hoursSlots.map(s => ({ name: s.name, profit: s.profit }));
+  };
+
+  // مخطط الأسبوعي (آخر 7 أيام)
+  const getWeeklyData = () => {
+    const daysList = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(now.getDate() - i);
-      const dateKey = d.toISOString().split('T')[0];
-      const dayName = arabicDays[d.getDay()];
-
-      last7Days.push({
-        dateKey,
-        name: dayName,
+      daysList.push({
+        dateKey: d.toISOString().split('T')[0],
+        name: arabicDays[d.getDay()],
         profit: 0
       });
     }
 
-    salesHistory.forEach((item) => {
-      if (!item.date) return;
-      const itemDateKey = item.date.split('T')[0];
-      const targetDay = last7Days.find((d) => d.dateKey === itemDateKey);
-
-      if (targetDay) {
-        const sale = parseFloat(item.sellingPrice) || 0;
-        const isLBP = item.currency === 'LBP';
-        const saleInUSD = isLBP ? sale / exchangeRate : sale;
-        const profit = item.profitUSD !== undefined
-          ? parseFloat(item.profitUSD) || 0
-          : Math.max(0, saleInUSD - (parseFloat(item.costUSD) || 0));
-
-        targetDay.profit = parseFloat((targetDay.profit + profit).toFixed(2));
+    filteredSales.forEach(item => {
+      const key = item.date.split('T')[0];
+      const target = daysList.find(d => d.dateKey === key);
+      if (target) {
+        const p = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, toUSD(item.sellingPrice, item.currency) - (parseFloat(item.costUSD) || 0));
+        target.profit = parseFloat((target.profit + p).toFixed(2));
       }
     });
 
-    return last7Days;
+    return daysList;
   };
 
-  const getDynamicMonthlyData = () => {
+  // مخطط الشهري (4 أسابيع)
+  const getMonthlyData = () => {
     const weeks = [
-      { name: 'الأسبوع 1', profit: 0 },
-      { name: 'الأسبوع 2', profit: 0 },
-      { name: 'الأسبوع 3', profit: 0 },
-      { name: 'الأسبوع 4', profit: 0 }
+      { name: 'أسبوع 1', profit: 0 },
+      { name: 'أسبوع 2', profit: 0 },
+      { name: 'أسبوع 3', profit: 0 },
+      { name: 'أسبوع 4', profit: 0 }
     ];
 
-    const now = new Date();
-    salesHistory.forEach((item) => {
-      if (!item.date) return;
-      const diffDays = Math.floor((now - new Date(item.date)) / (1000 * 60 * 60 * 24));
-      const sale = parseFloat(item.sellingPrice) || 0;
-      const isLBP = item.currency === 'LBP';
-      const saleInUSD = isLBP ? sale / exchangeRate : sale;
-      const profit = item.profitUSD !== undefined
-        ? parseFloat(item.profitUSD) || 0
-        : Math.max(0, saleInUSD - (parseFloat(item.costUSD) || 0));
-
-      if (diffDays >= 0 && diffDays < 7) weeks[3].profit += profit;
-      else if (diffDays >= 7 && diffDays < 14) weeks[2].profit += profit;
-      else if (diffDays >= 14 && diffDays < 21) weeks[1].profit += profit;
-      else if (diffDays >= 21 && diffDays < 28) weeks[0].profit += profit;
+    filteredSales.forEach(item => {
+      const dayOfMonth = new Date(item.date).getDate();
+      const p = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, toUSD(item.sellingPrice, item.currency) - (parseFloat(item.costUSD) || 0));
+      if (dayOfMonth <= 7) weeks[0].profit += p;
+      else if (dayOfMonth <= 14) weeks[1].profit += p;
+      else if (dayOfMonth <= 21) weeks[2].profit += p;
+      else weeks[3].profit += p;
     });
 
     return weeks.map(w => ({ ...w, profit: parseFloat(w.profit.toFixed(2)) }));
   };
 
-  const chartData = period === 'monthly' ? getDynamicMonthlyData() : getDynamicWeeklyData();
+  // مخطط السنوي (12 شهراً)
+  const getYearlyData = () => {
+    const months = arabicMonths.map(m => ({ name: m, profit: 0 }));
 
-  // تصدير التقرير المالي الملون والمربوط بديناميكية الهوية
+    filteredSales.forEach(item => {
+      const mIdx = new Date(item.date).getMonth();
+      const p = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, toUSD(item.sellingPrice, item.currency) - (parseFloat(item.costUSD) || 0));
+      if (months[mIdx]) {
+        months[mIdx].profit = parseFloat((months[mIdx].profit + p).toFixed(2));
+      }
+    });
+
+    return months;
+  };
+
+  const chartData = period === 'daily'
+    ? getDailyData()
+    : period === 'weekly'
+      ? getWeeklyData()
+      : period === 'monthly'
+        ? getMonthlyData()
+        : getYearlyData();
+
   const handleExportSummary = () => {
-    const items = salesHistory.map(s => {
-      const sale = parseFloat(s.sellingPrice) || 0;
-      const isLBP = s.currency === 'LBP';
-      const saleInUSD = isLBP ? sale / exchangeRate : sale;
+    const periodTitles = {
+      daily: 'اليومي',
+      weekly: 'الأسبوعي',
+      monthly: 'الشهري',
+      yearly: 'السنوي'
+    };
+
+    const items = filteredSales.map(s => {
+      const saleInUSD = toUSD(s.sellingPrice, s.currency);
       const profitInUSD = s.profitUSD !== undefined
         ? parseFloat(s.profitUSD) || 0
         : Math.max(0, saleInUSD - (parseFloat(s.costUSD) || 0));
@@ -127,7 +174,7 @@ export default function Analytics({
     });
 
     openPrintableReceipt({
-      title: `تقرير الجرد المالي الشامل (${period === 'monthly' ? 'شهري' : 'أسبوعي'})`,
+      title: `تقرير الجرد المالي الشامل (${periodTitles[period] || 'العام'})`,
       shopName: brandConfig.name,
       shopSubtitle: brandConfig.subtitle,
       shopPhone: brandConfig.phone,
@@ -141,7 +188,7 @@ export default function Analytics({
         debts: `$${totalDebtsUSD.toFixed(2)} (${debts.filter(d => !d.paid).length} ذمة غير مسددة)`,
         grandTotal: `$${totalWalletsUSD.toFixed(2)} (سيولة الصناديق الحالية)`
       },
-      notes: `سعر الصرف المعتمد بالجرد: $1 = ${exchangeRate.toLocaleString()} ل.ل • عدد الحركات: ${salesHistory.length}`,
+      notes: `سعر الصرف المعتمد بالجرد: $1 = ${exchangeRate.toLocaleString()} ل.ل • عدد الحركات في التقرير: ${filteredSales.length}`,
       accentColor: '#FF7A00'
     });
   };
@@ -149,7 +196,6 @@ export default function Analytics({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', direction: 'rtl' }}>
 
-      {/* بطاقة التقرير والمبيعات الرئيسية */}
       <div className="tz-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -177,25 +223,28 @@ export default function Analytics({
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
+        {/* فلاتر الفترات الأربعة الصريحة: يومي، أسبوعي، شهري، سنوي */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginBottom: '16px' }}>
           {[
-            { id: 'weekly', label: 'أسبوعي (أيام فعلية)' },
-            { id: 'monthly', label: 'شهري (أسابيع)' }
+            { id: 'daily', label: 'يومي' },
+            { id: 'weekly', label: 'أسبوعي' },
+            { id: 'monthly', label: 'شهري' },
+            { id: 'yearly', label: 'سنوي' }
           ].map((p) => (
             <button
               key={p.id}
               type="button"
               onClick={() => setPeriod(p.id)}
               style={{
-                flex: 1,
                 padding: '8px 4px',
                 borderRadius: '10px',
                 border: period === p.id ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
                 background: period === p.id ? 'var(--orange-primary)' : 'var(--bg-input)',
                 color: period === p.id ? '#ffffff' : 'var(--text-main)',
-                fontSize: '11px',
+                fontSize: '12px',
                 fontWeight: '900',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                textAlign: 'center'
               }}
             >
               {p.label}
@@ -203,10 +252,10 @@ export default function Analytics({
           ))}
         </div>
 
-        {/* المبيعات وصافي الأرباح الفعلية */}
+        {/* كروت الإجماليات للفترة المحددة */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
           <div style={{ background: 'var(--bg-input)', padding: '14px', borderRadius: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>إجمالي المبيعات الفعلي</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>إجمالي المبيعات</div>
             <div style={{ fontSize: '18px', fontWeight: '900', marginTop: '4px', color: 'var(--text-main)' }}>
               ${totalSalesUSD.toFixed(2)}
             </div>
@@ -225,7 +274,7 @@ export default function Analytics({
           </div>
         </div>
 
-        {/* المخطط البياني المربوط بالتواريخ الفعلية */}
+        {/* المخطط البياني المتفاعل مع كل فترة */}
         <div style={{ height: '170px', width: '100%', marginBottom: '14px' }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData}>
@@ -245,28 +294,33 @@ export default function Analytics({
           </ResponsiveContainer>
         </div>
 
-        {/* سجل العمليات الأخيرة */}
+        {/* تفاصيل العمليات الخاصة بالفترة المحددة */}
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
           <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--orange-primary)', marginBottom: '8px' }}>
-            آخر العمليات المسجلة بالجرد ({salesHistory.length}):
+            العمليات المندرجة بالجرد ({filteredSales.length}):
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
-            {salesHistory.slice(0, 8).map((s, idx) => (
-              <div key={idx} style={{ background: 'var(--bg-main)', padding: '8px 12px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <div>
-                  <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{s.customerName}</span>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginRight: '6px' }}>({s.operator?.toUpperCase() || s.itemName || 'رصيد'})</span>
-                </div>
-                <div style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>
-                  {parseFloat(s.sellingPrice).toLocaleString()} {s.currency === 'LBP' ? 'ل.ل' : '$'}
-                </div>
+            {filteredSales.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '16px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                لا توجد عمليات مسجلة في هذه الفترة
               </div>
-            ))}
+            ) : (
+              filteredSales.slice(0, 10).map((s, idx) => (
+                <div key={idx} style={{ background: 'var(--bg-main)', padding: '8px 12px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{s.customerName}</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginRight: '6px' }}>({s.operator?.toUpperCase() || s.itemName || 'رصيد'})</span>
+                  </div>
+                  <div style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>
+                    {parseFloat(s.sellingPrice).toLocaleString()} {s.currency === 'LBP' ? 'ل.ل' : '$'}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
 
-      {/* مخطط توزيع السيولة الحقيقي */}
       <DonutChart sources={sources} />
 
     </div>

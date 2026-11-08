@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Smartphone, Plus, Trash2, Edit3, ArrowRight, AlertTriangle, X, Gift, Users, ChevronDown, ChevronUp, Search, Layers } from 'lucide-react';
 
 export default function RechargeHub({
@@ -183,7 +184,6 @@ export default function RechargeHub({
 
     const deductUSD = parseFloat(giftCostDeduction) || 0;
 
-    // 1. إذا كان الخصم من رصيد الخط المسكر مباشرة
     if (giftSourceType === 'closed_line') {
       const lineBal = parseFloat(selectedLineObj?.balanceUSD || selectedLineObj?.balance || 0);
       if (deductUSD > lineBal) {
@@ -191,7 +191,6 @@ export default function RechargeHub({
         return;
       }
     } else {
-      // 2. إذا كان الخصم من شريحة عادية
       if (!selectedSimId) {
         alert('يرجى اختيار الشريحة المسحوب منها الرصيد!');
         return;
@@ -674,7 +673,6 @@ export default function RechargeHub({
               {isGiftOpen && (
                 <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
 
-                  {/* تبديل مصدر الخصم: من رصيد الخط المسكر مباشرة أو من الشريحة */}
                   <div style={{ marginBottom: '12px' }}>
                     <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
                       مكان خصم تكلفة الخدمة:
@@ -716,7 +714,6 @@ export default function RechargeHub({
                     </div>
                   </div>
 
-                  {/* قائمة اختيار الباقة */}
                   <div style={{ marginBottom: '10px' }}>
                     <label style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
                       اختر باقة ALFA GIFT (الجيجا والتكلفة الرسمية):
@@ -762,7 +759,6 @@ export default function RechargeHub({
                     </div>
                   </div>
 
-                  {/* حقل بحث وتصفية الخطوط المسكرة */}
                   <div style={{ marginBottom: '10px', position: 'relative' }}>
                     <label style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
                       الخط المسكر المفتوح منه الخدمة:
@@ -851,7 +847,6 @@ export default function RechargeHub({
                     )}
                   </div>
 
-                  {/* المستفيدون من الحصص */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
                     {giftRecipients.map((rec, idx) => (
                       <div key={idx} style={{ background: 'var(--bg-card)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1053,35 +1048,57 @@ export default function RechargeHub({
         </div>
       )}
 
-      {/* مودال الشريحة */}
-      {simModalOpen && (
+      {/* مودال الشريحة (مسنتر ومحمي بواسطة createPortal) */}
+      {simModalOpen && createPortal(
         <div className="modal-overlay">
-          <div className="modal-sheet">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-              <h3 style={{ margin: 0, color: 'var(--orange-primary)' }}>
+          <div className="modal-center" style={{ maxWidth: '400px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--orange-primary)' }}>
                 {editingSimId ? 'تعديل بيانات الشريحة ورصيدها' : 'إضافة شروة شريحة جديدة'}
               </h3>
-              <button type="button" onClick={() => setSimModalOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-main)', cursor: 'pointer' }}>
-                <X size={20} />
+              <button
+                type="button"
+                onClick={() => setSimModalOpen(false)}
+                style={{
+                  background: 'var(--bg-card-sub)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '50%',
+                  width: '30px',
+                  height: '30px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: 'var(--text-main)'
+                }}
+              >
+                <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleSaveSim} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <input
-                type="text"
-                placeholder="اسم الشريحة (مثال: شريحة ألفا جملة 1)..."
-                className="tz-input"
-                value={simName}
-                onChange={e => setSimName(e.target.value)}
-                required
-              />
-              <input
-                type="text"
-                placeholder="رقم الهاتف..."
-                className="tz-input"
-                value={simNumber}
-                onChange={e => setSimNumber(e.target.value)}
-              />
+              <div>
+                <input
+                  type="text"
+                  placeholder="اسم الشريحة (مثال: شريحة ألفا جملة 1)..."
+                  className="tz-input"
+                  value={simName}
+                  onChange={e => setSimName(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <input
+                  type="text"
+                  placeholder="رقم الهاتف..."
+                  className="tz-input"
+                  value={simNumber}
+                  onChange={e => setSimNumber(e.target.value)}
+                />
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <div>
                   <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>الرصيد المتاح ($):</label>
@@ -1093,7 +1110,7 @@ export default function RechargeHub({
                     value={purchasedCredits}
                     onChange={e => setPurchasedCredits(e.target.value)}
                     required
-                    style={{ marginTop: '4px' }}
+                    style={{ marginTop: '4px', fontWeight: 'bold' }}
                   />
                 </div>
                 <div>
@@ -1106,7 +1123,7 @@ export default function RechargeHub({
                     value={costAmount}
                     onChange={e => setCostAmount(e.target.value)}
                     required
-                    style={{ marginTop: '4px' }}
+                    style={{ marginTop: '4px', fontWeight: 'bold' }}
                   />
                 </div>
               </div>
@@ -1117,12 +1134,12 @@ export default function RechargeHub({
                   type="button"
                   onClick={() => setCostCurrency('LBP')}
                   style={{
-                    padding: '6px 14px',
-                    borderRadius: '8px',
-                    border: costCurrency === 'LBP' ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                    background: costCurrency === 'LBP' ? 'rgba(255, 122, 0, 0.2)' : 'transparent',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    border: costCurrency === 'LBP' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: costCurrency === 'LBP' ? 'var(--orange-subtle)' : 'var(--bg-card-sub)',
                     color: costCurrency === 'LBP' ? 'var(--orange-primary)' : 'var(--text-main)',
-                    fontSize: '12px',
+                    fontSize: '11px',
                     fontWeight: 'bold',
                     cursor: 'pointer'
                   }}
@@ -1133,12 +1150,12 @@ export default function RechargeHub({
                   type="button"
                   onClick={() => setCostCurrency('USD')}
                   style={{
-                    padding: '6px 14px',
-                    borderRadius: '8px',
-                    border: costCurrency === 'USD' ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                    background: costCurrency === 'USD' ? 'rgba(255, 122, 0, 0.2)' : 'transparent',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    border: costCurrency === 'USD' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: costCurrency === 'USD' ? 'var(--orange-subtle)' : 'var(--bg-card-sub)',
                     color: costCurrency === 'USD' ? 'var(--orange-primary)' : 'var(--text-main)',
-                    fontSize: '12px',
+                    fontSize: '11px',
                     fontWeight: 'bold',
                     cursor: 'pointer'
                   }}
@@ -1147,24 +1164,40 @@ export default function RechargeHub({
                 </button>
               </div>
 
-              <button type="submit" className="btn-action-full" style={{ justifyContent: 'center', marginTop: '6px' }}>
+              <button type="submit" className="btn-primary" style={{ height: '44px', marginTop: '6px' }}>
                 <span>{editingSimId ? 'حفظ التعديلات' : 'إضافة الشريحة'}</span>
               </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* مودال الدفعة */}
-      {batchModalOpen && targetSimForBatch && (
+      {/* مودال الدفعة (مسنتر ومحمي بواسطة createPortal) */}
+      {batchModalOpen && targetSimForBatch && createPortal(
         <div className="modal-overlay">
-          <div className="modal-sheet">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-              <h3 style={{ margin: 0, color: 'var(--orange-primary)' }}>
+          <div className="modal-center" style={{ maxWidth: '400px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--orange-primary)' }}>
                 إضافة دفعة رصيد إلى: {targetSimForBatch.name}
               </h3>
-              <button type="button" onClick={() => setBatchModalOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-main)', cursor: 'pointer' }}>
-                <X size={20} />
+              <button
+                type="button"
+                onClick={() => setBatchModalOpen(false)}
+                style={{
+                  background: 'var(--bg-card-sub)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '50%',
+                  width: '30px',
+                  height: '30px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: 'var(--text-main)'
+                }}
+              >
+                <X size={16} />
               </button>
             </div>
 
@@ -1179,7 +1212,7 @@ export default function RechargeHub({
                   value={newBatchCredits}
                   onChange={e => setNewBatchCredits(e.target.value)}
                   required
-                  style={{ marginTop: '4px' }}
+                  style={{ marginTop: '4px', fontWeight: 'bold' }}
                 />
               </div>
 
@@ -1193,7 +1226,7 @@ export default function RechargeHub({
                   value={newBatchCost}
                   onChange={e => setNewBatchCost(e.target.value)}
                   required
-                  style={{ marginTop: '4px' }}
+                  style={{ marginTop: '4px', fontWeight: 'bold' }}
                 />
               </div>
 
@@ -1203,12 +1236,12 @@ export default function RechargeHub({
                   type="button"
                   onClick={() => setNewBatchCurrency('LBP')}
                   style={{
-                    padding: '6px 14px',
-                    borderRadius: '8px',
-                    border: newBatchCurrency === 'LBP' ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                    background: newBatchCurrency === 'LBP' ? 'rgba(255, 122, 0, 0.2)' : 'transparent',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    border: newBatchCurrency === 'LBP' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: newBatchCurrency === 'LBP' ? 'var(--orange-subtle)' : 'var(--bg-card-sub)',
                     color: newBatchCurrency === 'LBP' ? 'var(--orange-primary)' : 'var(--text-main)',
-                    fontSize: '12px',
+                    fontSize: '11px',
                     fontWeight: 'bold',
                     cursor: 'pointer'
                   }}
@@ -1219,12 +1252,12 @@ export default function RechargeHub({
                   type="button"
                   onClick={() => setNewBatchCurrency('USD')}
                   style={{
-                    padding: '6px 14px',
-                    borderRadius: '8px',
-                    border: newBatchCurrency === 'USD' ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                    background: newBatchCurrency === 'USD' ? 'rgba(255, 122, 0, 0.2)' : 'transparent',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    border: newBatchCurrency === 'USD' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: newBatchCurrency === 'USD' ? 'var(--orange-subtle)' : 'var(--bg-card-sub)',
                     color: newBatchCurrency === 'USD' ? 'var(--orange-primary)' : 'var(--text-main)',
-                    fontSize: '12px',
+                    fontSize: '11px',
                     fontWeight: 'bold',
                     cursor: 'pointer'
                   }}
@@ -1233,12 +1266,13 @@ export default function RechargeHub({
                 </button>
               </div>
 
-              <button type="submit" className="btn-action-full" style={{ justifyContent: 'center', marginTop: '6px' }}>
+              <button type="submit" className="btn-primary" style={{ height: '44px', marginTop: '6px' }}>
                 <span>تثبيت الدفعة في الخط</span>
               </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>

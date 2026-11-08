@@ -124,7 +124,7 @@ export default function AuthAndLicenseScreen({ onAuthenticated, brandConfig }) {
   return (
     <div className="modal-overlay" style={{ background: 'var(--bg-main)' }}>
       <div className="modal-center" style={{ textAlign: 'center', maxWidth: '380px' }}>
-        
+
         {!isLicensed ? (
           <div>
             <div style={{ width: '56px', height: '56px', borderRadius: '18px', background: 'var(--orange-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: 'var(--orange-primary)' }}>

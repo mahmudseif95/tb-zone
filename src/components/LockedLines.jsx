@@ -11,7 +11,9 @@ import {
   Trash2,
   Zap,
   Edit3,
-  UserCheck
+  UserCheck,
+  User,
+  Building2
 } from 'lucide-react';
 
 export default function LockedLines({
@@ -33,13 +35,17 @@ export default function LockedLines({
   const [selectedLine, setSelectedLine] = useState(null);
 
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [targetUserSlot, setTargetUserSlot] = useState(1);
+  const [targetUserSlot, setTargetUserSlot] = useState(1); // 1, 2, 3 or 'admin'
   const [userSaleForm, setUserSaleForm] = useState({
+    customerType: 'customers', // 'customers' | 'merchants'
     name: '',
     phone: '',
+    address: '',
     gb: '22',
     price: '',
     currency: 'USD',
+    paymentType: 'cash', // 'cash' | 'partial' | 'debt'
+    partialPaidAmount: '',
     isDebt: false
   });
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
@@ -186,14 +192,34 @@ export default function LockedLines({
 
   const openUserSaleModal = (slotNum) => {
     setTargetUserSlot(slotNum);
-    setUserSaleForm({
-      name: '',
-      phone: '',
-      gb: '22',
-      price: '',
-      currency: 'USD',
-      isDebt: false
-    });
+
+    if (slotNum === 'admin') {
+      setUserSaleForm({
+        customerType: 'customers',
+        name: formData.adminName || '',
+        phone: formData.adminPhone || '',
+        address: formData.adminAddress || '',
+        gb: formData.adminGB || '22',
+        price: formData.adminPrice || '',
+        currency: 'USD',
+        paymentType: 'cash',
+        partialPaidAmount: '',
+        isDebt: false
+      });
+    } else {
+      setUserSaleForm({
+        customerType: 'customers',
+        name: '',
+        phone: '',
+        address: '',
+        gb: '22',
+        price: '',
+        currency: 'USD',
+        paymentType: 'cash',
+        partialPaidAmount: '',
+        isDebt: false
+      });
+    }
     setCustomerSuggestions([]);
     setShowAddUserModal(true);
   };
@@ -215,41 +241,82 @@ export default function LockedLines({
     setUserSaleForm(prev => ({
       ...prev,
       name: c.name,
-      phone: c.phone || ''
+      phone: c.phone || '',
+      address: c.address || ''
     }));
     setCustomerSuggestions([]);
   };
+
+  const rawSaleTotal = parseFloat(userSaleForm.price) || 0;
+  const remainingDebtAmount = userSaleForm.paymentType === 'debt'
+    ? rawSaleTotal
+    : userSaleForm.paymentType === 'partial'
+      ? Math.max(0, rawSaleTotal - (parseFloat(userSaleForm.partialPaidAmount) || 0))
+      : 0;
 
   const handleConfirmUserSale = (e) => {
     e.preventDefault();
     if (!userSaleForm.name.trim()) return;
 
     const userText = `${userSaleForm.name.trim()} (${userSaleForm.gb} GB)`;
-    const slotKey = `user${targetUserSlot}`;
+    const isUserAdmin = targetUserSlot === 'admin';
 
-    const updatedLineData = {
-      ...formData,
-      [slotKey]: userText
-    };
-    setFormData(updatedLineData);
-
-    if (selectedLine) {
-      onUpdateLine(selectedLine.id, (prev) => ({
+    if (isUserAdmin) {
+      setFormData(prev => ({
         ...prev,
-        [slotKey]: userText
+        adminName: userSaleForm.name.trim(),
+        adminPhone: userSaleForm.phone.trim(),
+        adminAddress: userSaleForm.address.trim(),
+        adminGB: userSaleForm.gb,
+        adminPrice: userSaleForm.price
       }));
+
+      if (selectedLine) {
+        onUpdateLine(selectedLine.id, (prev) => ({
+          ...prev,
+          adminName: userSaleForm.name.trim(),
+          adminPhone: userSaleForm.phone.trim(),
+          adminAddress: userSaleForm.address.trim(),
+          adminGB: userSaleForm.gb,
+          adminPrice: userSaleForm.price
+        }));
+      }
+    } else {
+      const slotKey = `user${targetUserSlot}`;
+      setFormData(prev => ({ ...prev, [slotKey]: userText }));
+
+      if (selectedLine) {
+        onUpdateLine(selectedLine.id, (prev) => ({
+          ...prev,
+          [slotKey]: userText
+        }));
+      }
     }
 
     if (onRecordSaleFromLine && userSaleForm.price) {
+      const isPartialOrDebt = userSaleForm.paymentType === 'debt' || (userSaleForm.paymentType === 'partial' && remainingDebtAmount > 0);
+
       onRecordSaleFromLine({
-        title: `حصة خط #${formData.slotNumber}`,
-        itemName: `UShare (${userSaleForm.gb} GB #${formData.slotNumber} - ${formData.phoneNumber})`,
-        sellingPrice: parseFloat(userSaleForm.price) || 0,
+        title: isUserAdmin ? `حصة أدمن #${formData.slotNumber}` : `حصة مستخدم #${formData.slotNumber}`,
+        itemName: isUserAdmin
+          ? `حصة أدمن (${userSaleForm.gb} GB #${formData.slotNumber} - ${formData.phoneNumber})`
+          : `UShare (${userSaleForm.gb} GB #${formData.slotNumber} - ${formData.phoneNumber})`,
+        sellingPrice: rawSaleTotal,
         currency: userSaleForm.currency,
         costUSD: 0,
+        customerType: userSaleForm.customerType,
         customerName: userSaleForm.name.trim(),
         customerPhone: userSaleForm.phone.trim(),
-        isDebt: userSaleForm.isDebt,
+        customerAddress: userSaleForm.address.trim(),
+        paymentType: userSaleForm.paymentType,
+        paidAmount: userSaleForm.paymentType === 'cash' ? rawSaleTotal : (parseFloat(userSaleForm.partialPaidAmount) || 0),
+        remainingDebt: remainingDebtAmount,
+        isDebt: isPartialOrDebt,
+        targetLineId: selectedLine ? selectedLine.id : null,
+        lockedLineId: selectedLine ? selectedLine.id : null,
+        lineSlot: formData.slotNumber,
+        linePhone: formData.phoneNumber,
+        lineType: formData.type,
         date: new Date().toISOString()
       });
     }
@@ -603,41 +670,10 @@ export default function LockedLines({
         )}
       </div>
 
-      {/* المودال المركزي - محمي بزر X */}
+      {/* المودال المركزي لإضافة وتعديل الخط */}
       {activeModal && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999999,
-            padding: '16px',
-            direction: 'rtl'
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1.5px solid var(--border-color)',
-              borderRadius: '24px',
-              padding: '18px',
-              width: '100%',
-              maxWidth: '390px',
-              maxHeight: '85vh',
-              overflowY: 'auto',
-              boxShadow: '0 24px 70px rgba(0, 0, 0, 0.8)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px'
-            }}
-          >
+        <div className="modal-overlay">
+          <div className="modal-center" style={{ maxWidth: '390px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: 'var(--orange-primary)' }}>
                 {activeModal === 'add' ? `إضافة خط ${formData.type === 'open' ? 'مفتوح (أدمن)' : 'مسكر'}` : `تعديل خط #${formData.slotNumber}`}
@@ -717,11 +753,32 @@ export default function LockedLines({
 
               {formData.type === 'open' && (
                 <div style={{ background: 'var(--bg-card-sub)', padding: '10px', borderRadius: '14px', border: '1.5px solid var(--orange-primary)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <UserCheck size={16} color="var(--orange-primary)" />
-                    <span style={{ fontSize: '12px', fontWeight: '900', color: 'var(--orange-primary)' }}>
-                      بيانات وحصة الأدمن (المسؤول عن الخط):
-                    </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <UserCheck size={16} color="var(--orange-primary)" />
+                      <span style={{ fontSize: '12px', fontWeight: '900', color: 'var(--orange-primary)' }}>
+                        بيانات وحصة الأدمن:
+                      </span>
+                    </div>
+
+                    {activeModal === 'details' && (
+                      <button
+                        type="button"
+                        onClick={() => openUserSaleModal('admin')}
+                        style={{
+                          background: 'rgba(255, 122, 0, 0.15)',
+                          border: '1px solid var(--orange-primary)',
+                          color: 'var(--orange-primary)',
+                          borderRadius: '8px',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        تسجيل مبيع حصة الأدمن
+                      </button>
+                    )}
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '6px' }}>
@@ -869,57 +926,81 @@ export default function LockedLines({
         document.body
       )}
 
-      {/* نافذة بيع الحصة - محمية بزر X */}
+      {/* نافذة بيع وتخصيص الحصة */}
       {showAddUserModal && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(0, 0, 0, 0.8)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000000,
-            padding: '16px',
-            direction: 'rtl'
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1.5px solid var(--border-color)',
-              borderRadius: '24px',
-              padding: '18px',
-              width: '100%',
-              maxWidth: '360px',
-              boxShadow: '0 24px 70px rgba(0, 0, 0, 0.9)'
-            }}
-          >
+        <div className="modal-overlay">
+          <div className="modal-center" style={{ maxWidth: '370px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: 'var(--orange-primary)' }}>
-                تخصيص حصة مستخدم #{targetUserSlot}
+                {targetUserSlot === 'admin' ? 'تخصيص حصة الأدمن' : `تخصيص حصة مستخدم #${targetUserSlot}`}
               </h3>
               <button type="button" onClick={() => setShowAddUserModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmUserSale} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <form onSubmit={handleConfirmUserSale} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {/* خيار نوع العميل: زبون عادي أو تاجر */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setUserSaleForm(prev => ({ ...prev, customerType: 'customers' }))}
+                  style={{
+                    padding: '8px',
+                    borderRadius: '10px',
+                    border: userSaleForm.customerType === 'customers' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: userSaleForm.customerType === 'customers' ? 'rgba(255, 122, 0, 0.15)' : 'var(--bg-card-sub)',
+                    color: userSaleForm.customerType === 'customers' ? 'var(--orange-primary)' : 'var(--text-main)',
+                    fontSize: '11px',
+                    fontWeight: '900',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <User size={13} />
+                  <span>زبون عادي</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserSaleForm(prev => ({ ...prev, customerType: 'merchants' }))}
+                  style={{
+                    padding: '8px',
+                    borderRadius: '10px',
+                    border: userSaleForm.customerType === 'merchants' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: userSaleForm.customerType === 'merchants' ? 'rgba(255, 122, 0, 0.15)' : 'var(--bg-card-sub)',
+                    color: userSaleForm.customerType === 'merchants' ? 'var(--orange-primary)' : 'var(--text-main)',
+                    fontSize: '11px',
+                    fontWeight: '900',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <Building2 size={13} />
+                  <span>تاجر / محل</span>
+                </button>
+              </div>
+
+              {/* حقل اسم العميل مع البحث الذكي */}
               <div style={{ position: 'relative' }}>
-                <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>اسم العميل:</label>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {userSaleForm.customerType === 'merchants' ? 'اسم التاجر / المحل:' : 'اسم العميل / الزبون:'}
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="ابحث بالاسم أو الرقم..."
                   className="tz-input"
-                  style={{ height: '40px' }}
+                  style={{ height: '38px', marginTop: '2px' }}
                   value={userSaleForm.name}
                   onChange={e => handleCustomerSearch(e.target.value)}
                   autoComplete="off"
+                  autoFocus
                 />
 
                 {customerSuggestions.length > 0 && (
@@ -929,7 +1010,7 @@ export default function LockedLines({
                     left: 0,
                     right: 0,
                     background: 'var(--bg-card)',
-                    border: '1px solid var(--orange-primary)',
+                    border: '1.5px solid var(--orange-primary)',
                     borderRadius: '10px',
                     zIndex: 10000001,
                     maxHeight: '140px',
@@ -951,95 +1032,176 @@ export default function LockedLines({
                 )}
               </div>
 
-              <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>رقم الهاتف:</label>
-                <input
-                  type="tel"
-                  placeholder="رقم الهاتف..."
-                  className="tz-input"
-                  style={{ height: '40px' }}
-                  value={userSaleForm.phone}
-                  onChange={e => setUserSaleForm({ ...userSaleForm, phone: e.target.value })}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                <div>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>رقم الهاتف:</label>
+                  <input
+                    type="tel"
+                    placeholder="رقم الهاتف..."
+                    className="tz-input"
+                    style={{ height: '36px' }}
+                    value={userSaleForm.phone}
+                    onChange={e => setUserSaleForm({ ...userSaleForm, phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>العنوان / المنطقة:</label>
+                  <input
+                    type="text"
+                    placeholder="المنطقة..."
+                    className="tz-input"
+                    style={{ height: '36px' }}
+                    value={userSaleForm.address}
+                    onChange={e => setUserSaleForm({ ...userSaleForm, address: e.target.value })}
+                  />
+                </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>حجم الحصة (GB):</label>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>حجم الحصة (GB):</label>
                   <input
                     type="number"
                     step="any"
                     required
-                    placeholder="مثال: 22"
+                    placeholder="22"
                     className="tz-input"
-                    style={{ height: '40px' }}
+                    style={{ height: '36px', fontWeight: 'bold' }}
                     value={userSaleForm.gb}
                     onChange={e => setUserSaleForm({ ...userSaleForm, gb: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>سعر البيع:</label>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>سعر المبيع:</label>
                   <input
                     type="number"
                     step="any"
                     required
                     placeholder="السعر..."
                     className="tz-input"
-                    style={{ height: '40px' }}
+                    style={{ height: '36px', fontWeight: 'bold', color: 'var(--orange-primary)' }}
                     value={userSaleForm.price}
                     onChange={e => setUserSaleForm({ ...userSaleForm, price: e.target.value })}
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: '6px' }}>
+              {/* اختيار عملة المبيع */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setUserSaleForm(prev => ({ ...prev, currency: 'USD' }))}
+                  style={{
+                    padding: '6px',
+                    borderRadius: '8px',
+                    border: userSaleForm.currency === 'USD' ? '1.5px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: userSaleForm.currency === 'USD' ? 'var(--orange-subtle)' : 'transparent',
+                    color: userSaleForm.currency === 'USD' ? 'var(--orange-primary)' : 'var(--text-main)',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                >
+                  دولار ($)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserSaleForm(prev => ({ ...prev, currency: 'LBP' }))}
+                  style={{
+                    padding: '6px',
+                    borderRadius: '8px',
+                    border: userSaleForm.currency === 'LBP' ? '1.5px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                    background: userSaleForm.currency === 'LBP' ? 'var(--orange-subtle)' : 'transparent',
+                    color: userSaleForm.currency === 'LBP' ? 'var(--orange-primary)' : 'var(--text-main)',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ليرة (LBP)
+                </button>
+              </div>
+
+              {/* قسم طريقة الدفع: كاش، جزئي، دين */}
+              <div style={{ background: 'var(--bg-card-sub)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold' }}>طريقة الدفع:</span>
+                  <span style={{ fontSize: '11px', fontWeight: '900', color: 'var(--orange-primary)' }}>
+                    المطلوب: {rawSaleTotal.toLocaleString()} {userSaleForm.currency === 'LBP' ? 'ل.ل' : '$'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
                   <button
                     type="button"
-                    onClick={() => setUserSaleForm({ ...userSaleForm, currency: 'USD' })}
+                    onClick={() => setUserSaleForm(prev => ({ ...prev, paymentType: 'cash' }))}
                     style={{
-                      padding: '4px 10px',
+                      padding: '6px 4px',
                       borderRadius: '8px',
-                      border: userSaleForm.currency === 'USD' ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                      background: userSaleForm.currency === 'USD' ? 'var(--orange-primary)' : 'transparent',
-                      color: userSaleForm.currency === 'USD' ? '#fff' : 'var(--text-main)',
-                      fontSize: '11px',
+                      border: userSaleForm.paymentType === 'cash' ? '1.5px solid var(--green)' : '1px solid var(--border-color)',
+                      background: userSaleForm.paymentType === 'cash' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                      color: userSaleForm.paymentType === 'cash' ? 'var(--green)' : 'var(--text-main)',
+                      fontSize: '10px',
                       fontWeight: 'bold',
                       cursor: 'pointer'
                     }}
                   >
-                    دولار ($)
+                    كاش نقداً
                   </button>
                   <button
                     type="button"
-                    onClick={() => setUserSaleForm({ ...userSaleForm, currency: 'LBP' })}
+                    onClick={() => setUserSaleForm(prev => ({ ...prev, paymentType: 'partial' }))}
                     style={{
-                      padding: '4px 10px',
+                      padding: '6px 4px',
                       borderRadius: '8px',
-                      border: userSaleForm.currency === 'LBP' ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                      background: userSaleForm.currency === 'LBP' ? 'var(--orange-primary)' : 'transparent',
-                      color: userSaleForm.currency === 'LBP' ? '#fff' : 'var(--text-main)',
-                      fontSize: '11px',
+                      border: userSaleForm.paymentType === 'partial' ? '1.5px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                      background: userSaleForm.paymentType === 'partial' ? 'rgba(255, 122, 0, 0.15)' : 'transparent',
+                      color: userSaleForm.paymentType === 'partial' ? 'var(--orange-primary)' : 'var(--text-main)',
+                      fontSize: '10px',
                       fontWeight: 'bold',
                       cursor: 'pointer'
                     }}
                   >
-                    ليرة (LBP)
+                    دفع جزئي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserSaleForm(prev => ({ ...prev, paymentType: 'debt' }))}
+                    style={{
+                      padding: '6px 4px',
+                      borderRadius: '8px',
+                      border: userSaleForm.paymentType === 'debt' ? '1.5px solid var(--red)' : '1px solid var(--border-color)',
+                      background: userSaleForm.paymentType === 'debt' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                      color: userSaleForm.paymentType === 'debt' ? 'var(--red)' : 'var(--text-main)',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    آجل (دين)
                   </button>
                 </div>
 
-                <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={userSaleForm.isDebt}
-                    onChange={e => setUserSaleForm({ ...userSaleForm, isDebt: e.target.checked })}
-                    style={{ accentColor: 'var(--orange-primary)' }}
-                  />
-                  <span>تسجيل كدين</span>
-                </label>
+                {userSaleForm.paymentType === 'partial' && (
+                  <div style={{ marginTop: '4px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="المبلغ المدفوع كاش..."
+                      className="tz-input"
+                      style={{ height: '34px', fontSize: '11px', flex: 1 }}
+                      value={userSaleForm.partialPaidAmount}
+                      onChange={e => setUserSaleForm({ ...userSaleForm, partialPaidAmount: e.target.value })}
+                      required
+                    />
+                    <span style={{ fontSize: '10px', color: 'var(--red)', fontWeight: 'bold' }}>
+                      المتبقي كدين: {remainingDebtAmount.toLocaleString()}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              <button type="submit" className="btn-primary" style={{ marginTop: '6px', height: '42px' }}>
+              <button type="submit" className="btn-primary" style={{ marginTop: '4px', height: '42px', fontSize: '13px' }}>
                 تثبيت الحصة وتسجيل العملية
               </button>
             </form>
@@ -1048,36 +1210,10 @@ export default function LockedLines({
         document.body
       )}
 
-      {/* نافذة تعديل بيانات المشترك - محمية بزر X */}
+      {/* نافذة تعديل بيانات المشترك */}
       {editingUserInfo && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(0, 0, 0, 0.8)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000000,
-            padding: '16px',
-            direction: 'rtl'
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1.5px solid var(--border-color)',
-              borderRadius: '24px',
-              padding: '18px',
-              width: '100%',
-              maxWidth: '350px',
-              boxShadow: '0 24px 70px rgba(0, 0, 0, 0.9)'
-            }}
-          >
+        <div className="modal-overlay">
+          <div className="modal-center" style={{ maxWidth: '350px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Edit3 size={16} color="var(--orange-primary)" />
