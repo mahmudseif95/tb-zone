@@ -1216,7 +1216,7 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div className="tz-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900' }}>سجل العمليات والحركات</h3>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900' }}>سجل العمليات </h3>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>إجمالي العمليات: {salesHistory.length}</span>
               </div>
             </div>

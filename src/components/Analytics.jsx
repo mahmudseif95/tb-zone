@@ -316,7 +316,7 @@ export default function Analytics({
             </div>
           </div>
           <div style={{ background: 'var(--bg-input)', padding: '14px', borderRadius: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>صافي الربح الحقيقي</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>صافي الربح </div>
             <div style={{ fontSize: '18px', fontWeight: '900', color: 'var(--green)', marginTop: '4px' }}>
               +${totalProfitsUSD.toFixed(2)}
             </div>

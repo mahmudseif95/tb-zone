@@ -566,7 +566,7 @@ export default function SettingsModal({
 
             {/* تصدير الملف اليدوي */}
             <div style={{ background: 'var(--bg-card-sub)', padding: '12px', borderRadius: '14px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>تصدير / استرجاع ملف محلي (JSON):</span>
+              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>تصدير / استرجاع ملف محلي:</span>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <button

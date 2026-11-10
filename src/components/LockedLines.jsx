@@ -59,7 +59,7 @@ export default function LockedLines({
     hasService: false,
     serviceStartDate: '',
     balanceUSD: '0',
-    adminName: 'المدير الرئيسي',
+    adminName: ' الأدمن',
     adminPhone: '',
     adminAddress: '',
     adminGB: '22',
@@ -154,7 +154,7 @@ export default function LockedLines({
       hasService: false,
       serviceStartDate: defaultDateStr,
       balanceUSD: '0',
-      adminName: activeTab === 'open' ? 'المدير الرئيسي' : '',
+      adminName: activeTab === 'open' ? ' ' : '',
       adminPhone: '',
       adminAddress: '',
       adminGB: '22',
@@ -474,7 +474,7 @@ export default function LockedLines({
               cursor: 'pointer'
             }}
           >
-            الخطوط المفتوحة / أدمن ({openLines.length})
+            الخطوط المفتوحة ({openLines.length})
           </button>
         </div>
 
@@ -676,7 +676,7 @@ export default function LockedLines({
           <div className="modal-center" style={{ maxWidth: '390px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: 'var(--orange-primary)' }}>
-                {activeModal === 'add' ? `إضافة خط ${formData.type === 'open' ? 'مفتوح (أدمن)' : 'مسكر'}` : `تعديل خط #${formData.slotNumber}`}
+                {activeModal === 'add' ? `إضافة خط ${formData.type === 'open' ? 'مفتوح مع أدمن' : 'مسكر'}` : `تعديل خط #${formData.slotNumber}`}
               </h3>
               <button
                 type="button"
@@ -701,7 +701,7 @@ export default function LockedLines({
             <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '8px' }}>
                 <div>
-                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>رقم الخط بالمحل</label>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>رقم الخط </label>
                   <input type="number" required className="tz-input" style={{ height: '40px' }} value={formData.slotNumber} onChange={e => setFormData({ ...formData, slotNumber: e.target.value })} />
                 </div>
                 <div>

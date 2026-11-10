@@ -113,7 +113,7 @@ export default function HomeDashboard({
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 'bold' }}>
             <AlertCircle size={14} color="var(--red)" />
-            <span>الديون غير المسددة</span>
+            <span>الديون الغير مسددة</span>
           </div>
           <div style={{ fontSize: '18px', fontWeight: '900', color: 'var(--red)', marginTop: '4px' }}>
             ${totalUnpaidDebtsUSD.toFixed(2)}
@@ -124,7 +124,7 @@ export default function HomeDashboard({
       {/* أرصدة الصناديق النشطة مع إمكانية تعديل الدولار واللبناني معاً */}
       <div className="tz-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <span style={{ fontWeight: '900', fontSize: '14px' }}>أرصدة الصناديق النشطة</span>
+          <span style={{ fontWeight: '900', fontSize: '14px' }}>أرصدة الصناديق </span>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{sources.length} صناديق</span>
         </div>
 

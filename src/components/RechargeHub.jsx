@@ -441,6 +441,7 @@ export default function RechargeHub({
                   }}
                 >
                   (LBP)
+                  ليرة
                 </button>
                 <button
                   type="button"
@@ -457,6 +458,7 @@ export default function RechargeHub({
                   }}
                 >
                   ($)
+                  دولار
                 </button>
               </div>
             </div>

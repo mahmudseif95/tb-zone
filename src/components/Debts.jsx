@@ -259,7 +259,7 @@ export default function Debts({
           }}
         >
           <Layers size={18} />
-          <span>إجمالي كافة الديون والذمم (شامل الزبائن، التجار، والصناديق)</span>
+          <span>إجمالي كافة الديون  (شامل الزبائن، التجار، والصناديق)</span>
         </button>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
@@ -335,7 +335,7 @@ export default function Debts({
             </h2>
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            إجمالي المستحق القائم: <b style={{ color: 'var(--red)', fontSize: '13px' }}>${totalUnpaidUSD.toFixed(2)}</b>
+            إجمالي الديون: <b style={{ color: 'var(--red)', fontSize: '13px' }}>${totalUnpaidUSD.toFixed(2)}</b>
           </div>
         </div>
 
@@ -344,7 +344,7 @@ export default function Debts({
           className="btn-primary"
           style={{ width: 'auto', padding: '8px 14px', fontSize: '12px', borderRadius: '10px' }}
         >
-          <Plus size={14} /> إضافة ذمة
+          <Plus size={14} />  تسجيل دين جديد
         </button>
       </div>
 

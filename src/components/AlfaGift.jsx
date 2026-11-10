@@ -305,7 +305,7 @@ export default function AlfaGift({
                 ) : (
                     <div style={{ position: 'relative' }}>
                         <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--orange-primary)', marginBottom: '4px', display: 'block' }}>
-                            الخط المسكر المفتوح منه الخدمة:
+                            الخط المسكر يلي بدك تفتح منه الخدمة:
                         </label>
 
                         <div
@@ -518,7 +518,7 @@ export default function AlfaGift({
                         cursor: isGiftSubmitDisabled ? 'not-allowed' : 'pointer'
                     }}
                 >
-                    فوت عليي
+                    تم يا أسد
                 </button>
 
             </div>
