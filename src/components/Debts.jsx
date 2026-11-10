@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { formatDateTime, formatDateOnly } from '../utils/dateFormatter';
+import { formatDateTime } from '../utils/dateFormatter';
 import {
   BookOpen,
   Plus,
@@ -12,7 +12,9 @@ import {
   Briefcase,
   ArrowLeftRight,
   History,
-  Layers
+  Layers,
+  Clock,
+  Wallet
 } from 'lucide-react';
 
 export default function Debts({
@@ -176,8 +178,8 @@ export default function Debts({
       if (d.id === editingDebt.id) {
         return {
           ...d,
-          amount: remaining,
-          paid: remaining === 0,
+          amount: parseFloat(remaining.toFixed(2)),
+          paid: remaining <= 0.01,
           history: [...(d.history || []), paymentEntry]
         };
       }
@@ -353,131 +355,131 @@ export default function Debts({
             لا توجد سجلات مسجلة تحت هذا القسم.
           </div>
         ) : (
-          currentDebtsList.map(debt => (
-            <div
-              key={debt.id}
-              className="tz-card"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                padding: '12px 14px',
-                borderLeft: debt.paid ? '4px solid var(--green)' : '4px solid var(--red)'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div
-                    onClick={() => handleOpenHistory(debt)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-                    title="اضغط لعرض كشف الحساب المتسلسل"
-                  >
-                    <span style={{ fontSize: '15px', fontWeight: '900', textDecoration: debt.paid ? 'line-through' : 'none', color: 'var(--orange-primary)' }}>
-                      {debt.name}
-                    </span>
-                    <History size={13} color="var(--orange-primary)" />
-                    {debt.paid && (
-                      <span style={{ fontSize: '10px', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--green)', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
-                        تم السداد
+          currentDebtsList.map(debt => {
+            const isBoxDebt = debt.category === 'boxes';
+            const origAmt = parseFloat(debt.originalAmount) || parseFloat(debt.amount) || 0;
+            const currentRemAmt = parseFloat(debt.amount) || 0;
+            const repaidAmt = Math.max(0, parseFloat((origAmt - currentRemAmt).toFixed(2)));
+
+            return (
+              <div
+                key={debt.id}
+                className="tz-card"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  padding: '12px 14px',
+                  borderLeft: debt.paid ? '4px solid var(--green)' : '4px solid var(--red)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div
+                      onClick={() => handleOpenHistory(debt)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                      title="اضغط لعرض كشف الحساب المتسلسل"
+                    >
+                      <span style={{ fontSize: '15px', fontWeight: '900', textDecoration: debt.paid ? 'line-through' : 'none', color: isBoxDebt ? 'var(--orange-primary)' : 'var(--text-main)' }}>
+                        {debt.name}
                       </span>
-                    )}
-                    {activeCategory === 'all' && (
-                      <span style={{ fontSize: '9px', background: 'var(--bg-card-sub)', color: 'var(--text-muted)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
-                        {debt.category === 'merchants' ? 'تاجر' : debt.category === 'boxes' ? 'صندوق' : 'زبون'}
-                      </span>
-                    )}
+                      <History size={13} color="var(--orange-primary)" />
+                      {debt.paid && (
+                        <span style={{ fontSize: '10px', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--green)', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
+                          تم السداد بالكامل
+                        </span>
+                      )}
+                      {activeCategory === 'all' && (
+                        <span style={{ fontSize: '9px', background: 'var(--bg-card-sub)', color: 'var(--text-muted)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                          {debt.category === 'merchants' ? 'تاجر' : isBoxDebt ? 'صندوق' : 'زبون'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      استحقاق: {debt.dueDate || 'غير محدد'} {debt.notes ? `• ${debt.notes}` : ''}
+                    </div>
                   </div>
 
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    استحقاق: {debt.dueDate || 'غير محدد'} {debt.notes ? `• ${debt.notes}` : ''}
-                  </div>
-                </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: '15px', fontWeight: '900', color: debt.paid ? 'var(--green)' : 'var(--red)' }}>
+                        {currentRemAmt.toLocaleString()} {debt.currency === 'LBP' ? 'ل.ل' : '$'}
+                      </div>
+                      <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                        {debt.paid ? 'مسدد' : 'متبقي قائم'}
+                      </div>
+                    </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '900', color: debt.paid ? 'var(--green)' : 'var(--red)' }}>
-                    {parseFloat(debt.amount).toLocaleString()} {debt.currency === 'LBP' ? 'ل.ل' : '$'}
-                  </div>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {!debt.paid && (
+                        <button
+                          onClick={() => handleOpenPartial(debt)}
+                          style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--orange-primary)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                          title="قبض أو سداد دفعة جزئية"
+                        >
+                          دفعة
+                        </button>
+                      )}
 
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    {!debt.paid && (
                       <button
-                        onClick={() => handleOpenPartial(debt)}
-                        style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--orange-primary)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                        onClick={() => handleTogglePaid(debt)}
+                        style={{
+                          background: debt.paid ? 'var(--green)' : 'var(--bg-card-sub)',
+                          color: debt.paid ? '#fff' : 'var(--text-main)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          padding: '6px',
+                          cursor: 'pointer'
+                        }}
+                        title={debt.paid ? 'إعادة فتح الذمة' : 'تحديد كمسدد كامل'}
                       >
-                        دفعة
+                        <CheckCircle2 size={15} />
                       </button>
-                    )}
 
-                    <button
-                      onClick={() => handleTogglePaid(debt)}
-                      style={{
-                        background: debt.paid ? 'var(--green)' : 'var(--bg-card-sub)',
-                        color: debt.paid ? '#fff' : 'var(--text-main)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        padding: '6px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <CheckCircle2 size={15} />
-                    </button>
+                      <button
+                        onClick={() => handleOpenEdit(debt)}
+                        style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px', cursor: 'pointer' }}
+                        title="تعديل"
+                      >
+                        <Edit3 size={15} />
+                      </button>
 
-                    <button
-                      onClick={() => handleOpenEdit(debt)}
-                      style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px', cursor: 'pointer' }}
-                    >
-                      <Edit3 size={15} />
-                    </button>
-
-                    <button
-                      onClick={() => handleDelete(debt.id)}
-                      style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--red)', borderRadius: '8px', padding: '6px', cursor: 'pointer' }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                      <button
+                        onClick={() => handleDelete(debt.id)}
+                        style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--red)', borderRadius: '8px', padding: '6px', cursor: 'pointer' }}
+                        title="حذف"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </div>
                 </div>
+
+                {/* شريط الإيضاح لديون الصناديق أو الديون التي سدد جزء منها */}
+                {(isBoxDebt || repaidAmt > 0) && (
+                  <div style={{ background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', border: '1px solid var(--border-color)' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      الأصل: <b>{origAmt.toLocaleString()} {debt.currency}</b>
+                    </span>
+                    <span style={{ color: 'var(--green)', fontWeight: 'bold' }}>
+                      المسدد: {repaidAmt.toLocaleString()} {debt.currency}
+                    </span>
+                    <span style={{ color: debt.paid ? 'var(--green)' : 'var(--red)', fontWeight: 'bold' }}>
+                      الباقي: {currentRemAmt.toLocaleString()} {debt.currency}
+                    </span>
+                  </div>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
-      {/* المودال المركزي لإضافة وتعديل الذمة - محمي بزر X */}
+      {/* المودال المركزي لإضافة وتعديل الذمة */}
       {(activeModal === 'add' || activeModal === 'edit') && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999999,
-            padding: '16px',
-            direction: 'rtl'
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1.5px solid var(--border-color)',
-              borderRadius: '24px',
-              padding: '18px',
-              width: '100%',
-              maxWidth: '380px',
-              maxHeight: '80vh',
-              overflowY: 'auto',
-              boxShadow: '0 24px 70px rgba(0, 0, 0, 0.8)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px'
-            }}
-          >
+        <div className="modal-overlay">
+          <div className="modal-center" style={{ maxWidth: '380px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: 'var(--orange-primary)' }}>
                 {activeModal === 'add'
@@ -509,7 +511,7 @@ export default function Debts({
                   >
                     {sources.map(s => (
                       <option key={s.id} value={s.id}>
-                        {s.name} (رصيد: ${s.balance})
+                        {s.name} (رصيد: ${s.balanceUSD || s.balance || 0})
                       </option>
                     ))}
                   </select>
@@ -540,7 +542,7 @@ export default function Debts({
                     required
                     placeholder="المبلغ"
                     className="tz-input"
-                    style={{ height: '40px' }}
+                    style={{ height: '40px', fontWeight: 'bold' }}
                     value={amount}
                     onChange={e => setAmount(e.target.value)}
                   />
@@ -591,39 +593,10 @@ export default function Debts({
         document.body
       )}
 
-      {/* مودال دفع دفعة جزئية - محمي بزر X */}
+      {/* مودال دفع دفعة جزئية */}
       {activeModal === 'partial' && editingDebt && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999999,
-            padding: '16px',
-            direction: 'rtl'
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1.5px solid var(--border-color)',
-              borderRadius: '24px',
-              padding: '18px',
-              width: '100%',
-              maxWidth: '360px',
-              boxShadow: '0 24px 70px rgba(0, 0, 0, 0.8)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px'
-            }}
-          >
+        <div className="modal-overlay">
+          <div className="modal-center" style={{ maxWidth: '360px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '900' }}>قبض دفعة من: {editingDebt.name}</h3>
               <button
@@ -647,7 +620,7 @@ export default function Debts({
                   required
                   placeholder="المبلغ المدفوع..."
                   className="tz-input"
-                  style={{ height: '40px' }}
+                  style={{ height: '40px', fontWeight: 'bold' }}
                   value={partialPayment}
                   onChange={e => setPartialPayment(e.target.value)}
                   autoFocus
@@ -663,41 +636,10 @@ export default function Debts({
         document.body
       )}
 
-      {/* مودال كشف الحساب المتسلسل - محمي بزر X */}
+      {/* مودال كشف الحساب المتسلسل */}
       {activeModal === 'history' && selectedDebtForHistory && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999999,
-            padding: '16px',
-            direction: 'rtl'
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1.5px solid var(--border-color)',
-              borderRadius: '24px',
-              padding: '18px',
-              width: '100%',
-              maxWidth: '390px',
-              maxHeight: '80vh',
-              overflowY: 'auto',
-              boxShadow: '0 24px 70px rgba(0, 0, 0, 0.8)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px'
-            }}
-          >
+        <div className="modal-overlay">
+          <div className="modal-center" style={{ maxWidth: '390px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: 'var(--orange-primary)' }}>
@@ -715,7 +657,7 @@ export default function Debts({
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflowY: 'auto', flex: 1, marginTop: '8px' }}>
               {(!selectedDebtForHistory.history || selectedDebtForHistory.history.length === 0) ? (
                 <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '12px' }}>
                   لا توجد حركات مسجلة في كشف الحساب بعد.

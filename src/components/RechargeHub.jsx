@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Smartphone, Plus, Trash2, Edit3, ArrowRight, AlertTriangle, X, Gift, Users, ChevronDown, ChevronUp, Search, Layers } from 'lucide-react';
+import { Plus, Trash2, Edit3, ArrowRight, AlertTriangle, X } from 'lucide-react';
 
 export default function RechargeHub({
   sims = [],
-  lockedLines = [],
   onAddSimBatch,
   onUpdateSim,
   onDeleteSim,
   onExecuteMultiSale,
-  onExecuteAlfaGiftSale,
   exchangeRate = 89500,
   onUpdateExchangeRate
 }) {
@@ -21,32 +19,9 @@ export default function RechargeHub({
   const [sellingPrice, setSellingPrice] = useState('');
   const [activeSubTab, setActiveSubTab] = useState('sell');
 
-  // باقات ALFA GIFT
-  const ALFA_GIFT_TIERS = [
-    { label: '1 GB ➔ $3.5', gb: '1', price: '3.5' },
-    { label: '3 GB ➔ $6.9', gb: '3', price: '6.9' },
-    { label: '7 GB ➔ $9.0', gb: '7', price: '9' },
-    { label: '22 GB ➔ $14.5', gb: '22', price: '14.5' },
-    { label: '44 GB ➔ $21.0', gb: '44', price: '21' },
-    { label: '77 GB ➔ $31.0', gb: '77', price: '31' },
-    { label: 'أخرى (مخصص)...', gb: 'custom', price: '' }
-  ];
-
-  const [isGiftOpen, setIsGiftOpen] = useState(false);
-  const [giftSourceType, setGiftSourceType] = useState('closed_line'); // 'closed_line' | 'sim'
-  const [selectedGiftPackage, setSelectedGiftPackage] = useState('77');
-  const [giftCostDeduction, setGiftCostDeduction] = useState('31');
-  const [giftTotalGB, setGiftTotalGB] = useState('77');
-  const [selectedLockedLineId, setSelectedLockedLineId] = useState('');
-  const [lineSearchQuery, setLineSearchQuery] = useState('');
-  const [isLineSearchOpen, setIsLineSearchOpen] = useState(false);
-
-  const [giftRecipients, setGiftRecipients] = useState([
-    { name: '', phone: '', gb: '22', price: '', currency: 'USD' }
-  ]);
-
   const [simModalOpen, setSimModalOpen] = useState(false);
   const [editingSimId, setEditingSimId] = useState(null);
+  const [modalOperator, setModalOperator] = useState('alfa');
   const [simName, setSimName] = useState('');
   const [simNumber, setSimNumber] = useState('');
   const [purchasedCredits, setPurchasedCredits] = useState('');
@@ -97,129 +72,6 @@ export default function RechargeHub({
   const totalRawDeduction = parseFloat((totalCreditsAmount + totalTaxAmount).toFixed(2));
 
   const isBalanceExceeded = activeSim && totalRawDeduction > availableBalanceForSale;
-
-  const handleGiftPackageSelect = (packageValue) => {
-    setSelectedGiftPackage(packageValue);
-    if (packageValue === 'custom') {
-      setGiftTotalGB('');
-      setGiftCostDeduction('');
-    } else {
-      const match = ALFA_GIFT_TIERS.find(t => t.gb === packageValue);
-      if (match) {
-        setGiftTotalGB(match.gb);
-        setGiftCostDeduction(match.price);
-      }
-    }
-  };
-
-  // تصفية الخطوط المسكرة للبحث السريع
-  const lockedLinesOnly = lockedLines.filter(l => (l.type || 'locked') === 'locked');
-  const filteredLockedLines = lockedLinesOnly.filter(line => {
-    const q = lineSearchQuery.toLowerCase().trim();
-    if (!q) return true;
-    const slotStr = (line.slotNumber || '').toString();
-    const phoneStr = (line.phoneNumber || line.number || '').toString();
-    return slotStr.includes(q) || phoneStr.includes(q);
-  });
-
-  const selectedLineObj = lockedLines.find(l => l.id === selectedLockedLineId);
-
-  const handleSelectLineFromSearch = (line) => {
-    setSelectedLockedLineId(line.id);
-    setLineSearchQuery('');
-    setIsLineSearchOpen(false);
-
-    const existingUsers = [];
-    ['user1', 'user2', 'user3'].forEach(key => {
-      if (line[key]) {
-        const raw = line[key];
-        const namePart = raw.split('(')[0].trim();
-        const gbMatch = raw.match(/\(([^)]+)\)/);
-        const gbPart = gbMatch ? gbMatch[1].replace(/[^0-9.]/g, '') : '22';
-        existingUsers.push({
-          name: namePart,
-          phone: '',
-          gb: gbPart,
-          price: '',
-          currency: 'USD'
-        });
-      }
-    });
-
-    if (existingUsers.length > 0) {
-      setGiftRecipients(existingUsers);
-    } else {
-      setGiftRecipients([{ name: '', phone: '', gb: '22', price: '', currency: 'USD' }]);
-    }
-  };
-
-  const handleAddRecipient = () => {
-    if (giftRecipients.length < 3) {
-      setGiftRecipients([...giftRecipients, { name: '', phone: '', gb: '22', price: '', currency: 'USD' }]);
-    }
-  };
-
-  const handleUpdateRecipient = (index, field, value) => {
-    const updated = [...giftRecipients];
-    updated[index][field] = value;
-    setGiftRecipients(updated);
-  };
-
-  const handleRemoveRecipient = (index) => {
-    if (giftRecipients.length > 1) {
-      setGiftRecipients(giftRecipients.filter((_, i) => i !== index));
-    }
-  };
-
-  const maxGB = parseFloat(giftTotalGB) || 0;
-
-  // تنفيذ عملية Alfa Gift
-  const handleExecuteAlfaGift = (e) => {
-    e.preventDefault();
-
-    if (!selectedLockedLineId) {
-      alert('يرجى اختيار الخط المسكر المربوط بالخدمة أولاً!');
-      return;
-    }
-
-    const deductUSD = parseFloat(giftCostDeduction) || 0;
-
-    if (giftSourceType === 'closed_line') {
-      const lineBal = parseFloat(selectedLineObj?.balanceUSD || selectedLineObj?.balance || 0);
-      if (deductUSD > lineBal) {
-        alert(`رصيد الخط المسكر المتاح ($${lineBal.toFixed(2)}) لا يكفي لخصم تكلفة الخدمة ($${deductUSD})!`);
-        return;
-      }
-    } else {
-      if (!selectedSimId) {
-        alert('يرجى اختيار الشريحة المسحوب منها الرصيد!');
-        return;
-      }
-      if (deductUSD > availableBalanceForSale) {
-        alert(`رصيد الشريحة المتبقي ($${availableBalanceForSale.toFixed(2)}) لا يكفي لخصم $${deductUSD}!`);
-        return;
-      }
-    }
-
-    const validRecipients = giftRecipients.filter(r => r.name.trim() !== '');
-    if (validRecipients.length === 0) {
-      alert('يرجى إدخال اسم مستفيد واحد على الأقل مع حصته وسعره!');
-      return;
-    }
-
-    onExecuteAlfaGiftSale({
-      simId: giftSourceType === 'sim' ? selectedSimId : null,
-      selectedBatchId: giftSourceType === 'sim' ? selectedBatchId : null,
-      deductUSD: deductUSD,
-      lockedLineId: selectedLockedLineId,
-      totalGB: maxGB,
-      recipients: validRecipients,
-      exchangeRate: exchangeRate
-    });
-
-    setGiftRecipients([{ name: '', phone: '', gb: '22', price: '', currency: 'USD' }]);
-    setIsGiftOpen(false);
-  };
 
   const handleCheckout = (e) => {
     e.preventDefault();
@@ -274,6 +126,7 @@ export default function RechargeHub({
   const openSimModal = (sim = null) => {
     if (sim) {
       setEditingSimId(sim.id);
+      setModalOperator(sim.operator || operator);
       setSimName(sim.name);
       setSimNumber(sim.number);
       setPurchasedCredits((sim.balance || 0).toString());
@@ -281,6 +134,7 @@ export default function RechargeHub({
       setCostCurrency(sim.costCurrency || 'LBP');
     } else {
       setEditingSimId(null);
+      setModalOperator(operator);
       setSimName('');
       setSimNumber('');
       setPurchasedCredits('');
@@ -301,6 +155,7 @@ export default function RechargeHub({
       onUpdateSim(editingSimId, {
         name: simName,
         number: simNumber,
+        operator: modalOperator,
         balance: creditsNum,
         cost: costNum,
         costCurrency
@@ -320,7 +175,7 @@ export default function RechargeHub({
         id: Date.now().toString(),
         name: simName,
         number: simNumber,
-        operator,
+        operator: modalOperator,
         balance: creditsNum,
         initialBalance: creditsNum,
         cost: costNum,
@@ -540,7 +395,7 @@ export default function RechargeHub({
               <AlertTriangle size={24} color="var(--red)" />
               <div>
                 <div style={{ fontWeight: '900', color: 'var(--red)', fontSize: '14px' }}>
-                  يا خيي ما بيمشي الحال هيك!
+                  تنبيه: الرصيد غير كافٍ!
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--red)' }}>
                   المطلوب خصمه مع الضريبة هو <b>${totalRawDeduction}</b> بينما الرصيد المتوفر فقط <b>${availableBalanceForSale.toFixed(2)}</b>!
@@ -566,7 +421,7 @@ export default function RechargeHub({
             </div>
           )}
 
-          {/* قسم الدفع والسعر لبيع الرصيد العادي */}
+          {/* قسم الدفع والسعر لبيع الرصيد */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
             <div style={{ flex: 1 }}>
               <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>العملة:</label>
@@ -627,314 +482,12 @@ export default function RechargeHub({
             className="btn-action-full"
             style={{
               opacity: (totalItemsCount === 0 || !selectedSimId || isBalanceExceeded) ? 0.4 : 1,
-              cursor: (totalItemsCount === 0 || !selectedSimId || isBalanceExceeded) ? 'not-allowed' : 'pointer',
-              marginBottom: '16px'
+              cursor: (totalItemsCount === 0 || !selectedSimId || isBalanceExceeded) ? 'not-allowed' : 'pointer'
             }}
           >
             <span>تم يا طيب</span>
             <div className="btn-circle"><ArrowRight size={18} /></div>
           </button>
-
-          {/* بطاقة ALFA GIFT الذكية */}
-          {operator === 'alfa' && (
-            <div style={{
-              background: 'var(--bg-card-sub)',
-              border: '2px solid var(--orange-primary)',
-              borderRadius: '16px',
-              padding: '12px 14px'
-            }}>
-              <div
-                onClick={() => setIsGiftOpen(!isGiftOpen)}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  cursor: 'pointer',
-                  userSelect: 'none'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Gift size={20} color="var(--orange-primary)" />
-                  <span style={{ fontWeight: '900', fontSize: '16px', color: 'var(--orange-primary)' }}>
-                    ALFA GIFT
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {giftTotalGB && (
-                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--green)' }}>
-                      باقة: {giftTotalGB} GB
-                    </span>
-                  )}
-                  {isGiftOpen ? <ChevronUp size={20} color="var(--orange-primary)" /> : <ChevronDown size={20} color="var(--orange-primary)" />}
-                </div>
-              </div>
-
-              {isGiftOpen && (
-                <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
-
-                  <div style={{ marginBottom: '12px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
-                      مكان خصم تكلفة الخدمة:
-                    </label>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={() => setGiftSourceType('closed_line')}
-                        style={{
-                          padding: '8px',
-                          borderRadius: '10px',
-                          border: giftSourceType === 'closed_line' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                          background: giftSourceType === 'closed_line' ? 'var(--orange-subtle)' : 'transparent',
-                          color: giftSourceType === 'closed_line' ? 'var(--orange-primary)' : 'inherit',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        من رصيد الخط المسكر
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setGiftSourceType('sim')}
-                        style={{
-                          padding: '8px',
-                          borderRadius: '10px',
-                          border: giftSourceType === 'sim' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
-                          background: giftSourceType === 'sim' ? 'var(--orange-subtle)' : 'transparent',
-                          color: giftSourceType === 'sim' ? 'var(--orange-primary)' : 'inherit',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        سحب من الشريحة الأساسية
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: '10px' }}>
-                    <label style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
-                      اختر باقة ALFA GIFT (الجيجا والتكلفة الرسمية):
-                    </label>
-                    <select
-                      className="tz-select"
-                      dir="ltr"
-                      style={{ textAlign: 'left', fontWeight: 'bold' }}
-                      value={selectedGiftPackage}
-                      onChange={(e) => handleGiftPackageSelect(e.target.value)}
-                    >
-                      {ALFA_GIFT_TIERS.map((tier, idx) => (
-                        <option key={idx} value={tier.gb}>
-                          {tier.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                        {giftSourceType === 'closed_line' ? 'خصم من رصيد الخط ($):' : 'سحب من الشريحة ($):'}
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        className="tz-input"
-                        value={giftCostDeduction}
-                        onChange={(e) => setGiftCostDeduction(e.target.value)}
-                        placeholder="المبلغ ($)..."
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>حجم الباقة الإجمالي (GB):</label>
-                      <input
-                        type="text"
-                        className="tz-input"
-                        value={giftTotalGB}
-                        onChange={(e) => setGiftTotalGB(e.target.value)}
-                        placeholder="الحجم (GB)..."
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: '10px', position: 'relative' }}>
-                    <label style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
-                      الخط المسكر المفتوح منه الخدمة:
-                    </label>
-
-                    <div
-                      onClick={() => setIsLineSearchOpen(!isLineSearchOpen)}
-                      style={{
-                        background: 'var(--bg-input)',
-                        border: '1.5px solid var(--border-color)',
-                        borderRadius: '12px',
-                        padding: '10px 14px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <span style={{ fontSize: '13px', fontWeight: selectedLineObj ? 'bold' : 'normal', color: selectedLineObj ? 'var(--orange-primary)' : 'var(--text-muted)' }}>
-                        {selectedLineObj ? `خط #${selectedLineObj.slotNumber}: ${selectedLineObj.phoneNumber || selectedLineObj.number} (متوفر: $${selectedLineObj.balanceUSD || selectedLineObj.balance || 0})` : '-- ابحث أو اختر الخط المسكر --'}
-                      </span>
-                      <ChevronDown size={16} color="var(--text-muted)" />
-                    </div>
-
-                    {isLineSearchOpen && (
-                      <div style={{
-                        position: 'absolute',
-                        top: '100%',
-                        left: 0,
-                        right: 0,
-                        background: 'var(--bg-card)',
-                        border: '1.5px solid var(--orange-primary)',
-                        borderRadius: '14px',
-                        boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
-                        zIndex: 200,
-                        marginTop: '4px',
-                        padding: '8px',
-                        maxHeight: '220px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-input)', borderRadius: '8px', padding: '0 8px', border: '1px solid var(--border-color)' }}>
-                          <Search size={14} color="var(--text-muted)" />
-                          <input
-                            type="text"
-                            autoFocus
-                            placeholder="ابحث برقم الخط (مثال: 1) أو الهاتف..."
-                            className="tz-input"
-                            style={{ border: 'none', height: '34px', fontSize: '11px', background: 'transparent' }}
-                            value={lineSearchQuery}
-                            onChange={(e) => setLineSearchQuery(e.target.value)}
-                          />
-                        </div>
-
-                        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          {filteredLockedLines.length === 0 ? (
-                            <div style={{ padding: '8px', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center' }}>
-                              لا يوجد خط يطابق البحث
-                            </div>
-                          ) : (
-                            filteredLockedLines.map((line, idx) => (
-                              <div
-                                key={line.id}
-                                onClick={() => handleSelectLineFromSearch(line)}
-                                style={{
-                                  padding: '8px 10px',
-                                  borderRadius: '8px',
-                                  background: selectedLockedLineId === line.id ? 'var(--orange-glow)' : 'var(--bg-card-sub)',
-                                  color: selectedLockedLineId === line.id ? '#fff' : 'var(--text-main)',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  fontSize: '12px',
-                                  fontWeight: 'bold'
-                                }}
-                              >
-                                <span>خط #{line.slotNumber || idx + 1}</span>
-                                <span style={{ direction: 'ltr' }}>{line.phoneNumber || line.number} (رصيد: ${line.balanceUSD || line.balance || 0})</span>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-                    {giftRecipients.map((rec, idx) => (
-                      <div key={idx} style={{ background: 'var(--bg-card)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 'bold' }}>المستفيد #{idx + 1}</span>
-                          {idx > 0 && (
-                            <button type="button" onClick={() => handleRemoveRecipient(idx)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '10px' }}>
-                              إلغاء
-                            </button>
-                          )}
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '6px' }}>
-                          <input
-                            type="text"
-                            placeholder="اسم الزبون..."
-                            className="tz-input"
-                            value={rec.name}
-                            onChange={(e) => handleUpdateRecipient(idx, 'name', e.target.value)}
-                          />
-                          <input
-                            type="tel"
-                            placeholder="رقم الهاتف..."
-                            className="tz-input"
-                            value={rec.phone}
-                            onChange={(e) => handleUpdateRecipient(idx, 'phone', e.target.value)}
-                          />
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
-                          <input
-                            type="number"
-                            placeholder="الـ GB..."
-                            className="tz-input"
-                            value={rec.gb}
-                            onChange={(e) => handleUpdateRecipient(idx, 'gb', e.target.value)}
-                          />
-                          <input
-                            type="number"
-                            placeholder="السعر..."
-                            className="tz-input"
-                            value={rec.price}
-                            onChange={(e) => handleUpdateRecipient(idx, 'price', e.target.value)}
-                          />
-                          <select
-                            className="tz-select"
-                            value={rec.currency}
-                            onChange={(e) => handleUpdateRecipient(idx, 'currency', e.target.value)}
-                          >
-                            <option value="USD">$</option>
-                            <option value="LBP">ل.ل</option>
-                          </select>
-                        </div>
-                      </div>
-                    ))}
-
-                    {giftRecipients.length < 3 && (
-                      <button
-                        type="button"
-                        onClick={handleAddRecipient}
-                        style={{
-                          background: 'rgba(255, 122, 0, 0.1)',
-                          border: '1px dashed var(--orange-primary)',
-                          color: 'var(--orange-primary)',
-                          padding: '6px',
-                          borderRadius: '10px',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        + إضافة مستفيد آخر (حتى 3)
-                      </button>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleExecuteAlfaGift}
-                    disabled={!selectedLockedLineId || (giftSourceType === 'sim' && !selectedSimId)}
-                    className="btn-primary"
-                    style={{ height: '42px', fontSize: '13px' }}
-                  >
-                    فوت عليي
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
         </div>
       ) : (
         /* مخزن الشرائح والدفعات */
@@ -955,7 +508,7 @@ export default function RechargeHub({
                 cursor: 'pointer'
               }}
             >
-              + شروة جديدة
+              + إضافة شريحة جديدة
             </button>
           </div>
 
@@ -989,7 +542,7 @@ export default function RechargeHub({
                           style={{ background: 'rgba(255,122,0,0.15)', border: 'none', color: 'var(--orange-primary)', padding: '6px 8px', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
                           title="إضافة دفعة رصيد"
                         >
-                          + دفعة
+                          + دفعة رصيد
                         </button>
                         <button
                           type="button"
@@ -1048,13 +601,13 @@ export default function RechargeHub({
         </div>
       )}
 
-      {/* مودال الشريحة (مسنتر ومحمي بواسطة createPortal) */}
+      {/* مودال الشريحة */}
       {simModalOpen && createPortal(
         <div className="modal-overlay">
           <div className="modal-center" style={{ maxWidth: '400px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--orange-primary)' }}>
-                {editingSimId ? 'تعديل بيانات الشريحة ورصيدها' : 'إضافة شروة شريحة جديدة'}
+                {editingSimId ? 'تعديل بيانات الشريحة ورصيدها' : 'إضافة شريحة جديدة'}
               </h3>
               <button
                 type="button"
@@ -1077,25 +630,69 @@ export default function RechargeHub({
             </div>
 
             <form onSubmit={handleSaveSim} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* اختيار شبكة الشريحة صراحة */}
               <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
+                  شبكة الخط / الشريحة:
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setModalOperator('alfa')}
+                    style={{
+                      padding: '10px',
+                      borderRadius: '10px',
+                      border: modalOperator === 'alfa' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                      background: modalOperator === 'alfa' ? 'var(--orange-subtle)' : 'var(--bg-card-sub)',
+                      color: modalOperator === 'alfa' ? 'var(--orange-primary)' : 'var(--text-main)',
+                      fontWeight: '900',
+                      fontSize: '13px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ألفا (ALFA)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModalOperator('mtc')}
+                    style={{
+                      padding: '10px',
+                      borderRadius: '10px',
+                      border: modalOperator === 'mtc' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                      background: modalOperator === 'mtc' ? 'var(--orange-subtle)' : 'var(--bg-card-sub)',
+                      color: modalOperator === 'mtc' ? 'var(--orange-primary)' : 'var(--text-main)',
+                      fontWeight: '900',
+                      fontSize: '13px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    تاتش (TOUCH)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>اسم الشريحة بالمحل:</label>
                 <input
                   type="text"
-                  placeholder="اسم الشريحة (مثال: شريحة ألفا جملة 1)..."
+                  placeholder="مثال: شريحة ألفا جملة 1..."
                   className="tz-input"
                   value={simName}
                   onChange={e => setSimName(e.target.value)}
                   required
-                  autoFocus
+                  style={{ marginTop: '2px' }}
                 />
               </div>
 
               <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>رقم الهاتف:</label>
                 <input
                   type="text"
                   placeholder="رقم الهاتف..."
                   className="tz-input"
                   value={simNumber}
                   onChange={e => setSimNumber(e.target.value)}
+                  style={{ marginTop: '2px' }}
                 />
               </div>
 
@@ -1173,7 +770,7 @@ export default function RechargeHub({
         document.body
       )}
 
-      {/* مودال الدفعة (مسنتر ومحمي بواسطة createPortal) */}
+      {/* مودال الدفعة */}
       {batchModalOpen && targetSimForBatch && createPortal(
         <div className="modal-overlay">
           <div className="modal-center" style={{ maxWidth: '400px' }}>

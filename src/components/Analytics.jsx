@@ -19,8 +19,28 @@ export default function Analytics({
     return currency === 'LBP' ? val / exchangeRate : val;
   };
 
-  // 1. فلترة المبيعات بدقة طبقاً للفترة المختارة
+  const getLocalDateKey = (d) => {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
   const now = new Date();
+
+  // حساب نطاق الأسبوع الحالي (من بداية يوم الاثنين 00:00 إلى نهاية الأحد 23:59)
+  const getWeekRange = () => {
+    const dayOfWeek = now.getDay(); // 0: أحد، 1: اثنين ...
+    const distanceToMonday = (dayOfWeek + 6) % 7;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - distanceToMonday);
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    return { monday, sunday };
+  };
+
+  // 1. فلترة المبيعات بدقة طبقاً للفترة المختارة
   const filteredSales = salesHistory.filter(item => {
     if (!item.date) return false;
     const itemDate = new Date(item.date);
@@ -30,8 +50,8 @@ export default function Analytics({
       return itemDate.toDateString() === now.toDateString();
     }
     if (period === 'weekly') {
-      const diffDays = Math.floor((now - itemDate) / (1000 * 60 * 60 * 24));
-      return diffDays >= 0 && diffDays < 7;
+      const { monday, sunday } = getWeekRange();
+      return itemDate >= monday && itemDate <= sunday;
     }
     if (period === 'monthly') {
       return itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
@@ -56,20 +76,26 @@ export default function Analytics({
     totalProfitsUSD += profitInUSD;
   });
 
-  const totalDebtsUSD = debts.filter(d => !d.paid).reduce((sum, d) => sum + toUSD(d.amount, d.currency), 0);
+  // فصل ديون الزبائن عن رأس مال المحافظ المعلق
+  const unpaidCustomerDebtsUSD = debts
+    .filter(d => !d.paid && d.category !== 'boxes')
+    .reduce((sum, d) => sum + toUSD(d.amount, d.currency), 0);
+
+  const unpaidBoxDebtsUSD = debts
+    .filter(d => !d.paid && d.category === 'boxes')
+    .reduce((sum, d) => sum + toUSD(d.amount, d.currency), 0);
+
   const totalWalletsUSD = sources.reduce((sum, s) => sum + (parseFloat(s.balanceUSD ?? s.balance ?? 0)), 0);
 
-  // 2. تجميع بيانات الرسم البياني حسب الفترة
   const arabicDays = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-  const arabicMonths = ['كانون 2', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين 1', 'تشرين 2', 'كانون 1'];
 
-  // مخطط اليومي (موزع على ساعات اليوم)
+  // 1. مخطط اليومي: يبدأ من اليمين بـ صباحاً ➔ ظهراً ➔ عصراً ➔ مساءً
   const getDailyData = () => {
     const hoursSlots = [
-      { name: 'صباحاً', profit: 0, minHour: 0, maxHour: 12 },
-      { name: 'ظهراً', profit: 0, minHour: 12, maxHour: 16 },
+      { name: 'مساءً', profit: 0, minHour: 20, maxHour: 24 },
       { name: 'عصراً', profit: 0, minHour: 16, maxHour: 20 },
-      { name: 'مساءً', profit: 0, minHour: 20, maxHour: 24 }
+      { name: 'ظهراً', profit: 0, minHour: 12, maxHour: 16 },
+      { name: 'صباحاً', profit: 0, minHour: 0, maxHour: 12 }
     ];
 
     filteredSales.forEach(item => {
@@ -80,68 +106,89 @@ export default function Analytics({
       if (slot) slot.profit = parseFloat((slot.profit + p).toFixed(2));
     });
 
-    return hoursSlots.map(s => ({ name: s.name, profit: s.profit }));
+    return hoursSlots;
   };
 
-  // مخطط الأسبوعي (آخر 7 أيام)
+  // 2. مخطط الأسبوعي: يبدأ بالعامود الأول من اليمين (الاثنين ➔ الثلاثاء ➔ الأربعاء ➔ الخميس ➔ الجمعة ➔ السبت ➔ الأحد)
   const getWeeklyData = () => {
-    const daysList = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      daysList.push({
-        dateKey: d.toISOString().split('T')[0],
+    const { monday } = getWeekRange();
+
+    // مصفوفة الأيام مرتبة من الاثنين إلى الأحد
+    const daysFromMonToSun = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      daysFromMonToSun.push({
+        dateKey: getLocalDateKey(d),
         name: arabicDays[d.getDay()],
+        fullName: `${arabicDays[d.getDay()]} (${d.getDate()}/${d.getMonth() + 1})`,
         profit: 0
       });
     }
 
     filteredSales.forEach(item => {
-      const key = item.date.split('T')[0];
-      const target = daysList.find(d => d.dateKey === key);
+      const itemD = new Date(item.date);
+      const key = getLocalDateKey(itemD);
+      const target = daysFromMonToSun.find(d => d.dateKey === key);
       if (target) {
         const p = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, toUSD(item.sellingPrice, item.currency) - (parseFloat(item.costUSD) || 0));
         target.profit = parseFloat((target.profit + p).toFixed(2));
       }
     });
 
-    return daysList;
+    // Recharts ترسم إحداثيات المصفوفة من اليسار إلى اليمين
+    // لذلك نقوم بعكسها حتى يصبح "الاثنين" في أقصى اليمين (أول عامود) و"الأحد" في أقصى اليسار
+    return [...daysFromMonToSun].reverse();
   };
 
-  // مخطط الشهري (4 أسابيع)
+  // 3. مخطط الشهري: يبدأ من اليمين بـ أسبوع 1 ➔ أسبوع 2 ➔ أسبوع 3 ➔ أسبوع 4
   const getMonthlyData = () => {
     const weeks = [
-      { name: 'أسبوع 1', profit: 0 },
-      { name: 'أسبوع 2', profit: 0 },
+      { name: 'أسبوع 4', profit: 0 },
       { name: 'أسبوع 3', profit: 0 },
-      { name: 'أسبوع 4', profit: 0 }
+      { name: 'أسبوع 2', profit: 0 },
+      { name: 'أسبوع 1', profit: 0 }
     ];
 
     filteredSales.forEach(item => {
       const dayOfMonth = new Date(item.date).getDate();
       const p = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, toUSD(item.sellingPrice, item.currency) - (parseFloat(item.costUSD) || 0));
-      if (dayOfMonth <= 7) weeks[0].profit += p;
-      else if (dayOfMonth <= 14) weeks[1].profit += p;
-      else if (dayOfMonth <= 21) weeks[2].profit += p;
-      else weeks[3].profit += p;
+      if (dayOfMonth <= 7) weeks[3].profit += p;
+      else if (dayOfMonth <= 14) weeks[2].profit += p;
+      else if (dayOfMonth <= 21) weeks[1].profit += p;
+      else weeks[0].profit += p;
     });
 
     return weeks.map(w => ({ ...w, profit: parseFloat(w.profit.toFixed(2)) }));
   };
 
-  // مخطط السنوي (12 شهراً)
+  // 4. مخطط السنوي: يبدأ من اليمين بـ ك2 (كانون 2) وصولاً لـ ك1 (كانون 1) باليسار
   const getYearlyData = () => {
-    const months = arabicMonths.map(m => ({ name: m, profit: 0 }));
+    const monthConfig = [
+      { mIdx: 11, name: 'ك1', fullName: 'كانون الأول (12)', profit: 0 },
+      { mIdx: 10, name: 'ت2', fullName: 'تشرين الثاني (11)', profit: 0 },
+      { mIdx: 9, name: 'ت1', fullName: 'تشرين الأول (10)', profit: 0 },
+      { mIdx: 8, name: 'أيلول', fullName: 'أيلول (9)', profit: 0 },
+      { mIdx: 7, name: 'آب', fullName: 'آب (8)', profit: 0 },
+      { mIdx: 6, name: 'تموز', fullName: 'تموز (7)', profit: 0 },
+      { mIdx: 5, name: 'حزيران', fullName: 'حزيران (6)', profit: 0 },
+      { mIdx: 4, name: 'أيار', fullName: 'أيار (5)', profit: 0 },
+      { mIdx: 3, name: 'نيسان', fullName: 'نيسان (4)', profit: 0 },
+      { mIdx: 2, name: 'آذار', fullName: 'آذار (3)', profit: 0 },
+      { mIdx: 1, name: 'شباط', fullName: 'شباط (2)', profit: 0 },
+      { mIdx: 0, name: 'ك2', fullName: 'كانون الثاني (1)', profit: 0 }
+    ];
 
     filteredSales.forEach(item => {
-      const mIdx = new Date(item.date).getMonth();
+      const m = new Date(item.date).getMonth();
       const p = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, toUSD(item.sellingPrice, item.currency) - (parseFloat(item.costUSD) || 0));
-      if (months[mIdx]) {
-        months[mIdx].profit = parseFloat((months[mIdx].profit + p).toFixed(2));
+      const target = monthConfig.find(slot => slot.mIdx === m);
+      if (target) {
+        target.profit = parseFloat((target.profit + p).toFixed(2));
       }
     });
 
-    return months;
+    return monthConfig;
   };
 
   const chartData = period === 'daily'
@@ -166,10 +213,14 @@ export default function Analytics({
         ? parseFloat(s.profitUSD) || 0
         : Math.max(0, saleInUSD - (parseFloat(s.costUSD) || 0));
 
+      const profitLabel = profitInUSD > 0
+        ? `ربح: +$${profitInUSD.toFixed(2)}`
+        : 'استرداد تكلفة / سداد رأس مال';
+
       return {
         name: s.itemName || s.title || s.operator?.toUpperCase() || 'عملية بيع',
         sub: `${s.customerName || 'عام'} • ${formatDateTime(s.date || Date.now())}`,
-        price: `$${saleInUSD.toFixed(2)} (ربح: +$${profitInUSD.toFixed(2)})`
+        price: `$${saleInUSD.toFixed(2)} (${profitLabel})`
       };
     });
 
@@ -185,10 +236,11 @@ export default function Analytics({
       totals: {
         subTotal: `$${totalSalesUSD.toFixed(2)} (${Math.round(totalSalesUSD * exchangeRate).toLocaleString()} ل.ل)`,
         profit: `+$${totalProfitsUSD.toFixed(2)} (صافي ربح محقق)`,
-        debts: `$${totalDebtsUSD.toFixed(2)} (${debts.filter(d => !d.paid).length} ذمة غير مسددة)`,
-        grandTotal: `$${totalWalletsUSD.toFixed(2)} (سيولة الصناديق الحالية)`
+        debts: `$${unpaidCustomerDebtsUSD.toFixed(2)} (ديون الزبائن القائمة)`,
+        boxDebts: unpaidBoxDebtsUSD > 0 ? `$${unpaidBoxDebtsUSD.toFixed(2)} (رأس مال كروت معلق)` : null,
+        grandTotal: `$${totalWalletsUSD.toFixed(2)} (سيولة الصناديق المتوفرة)`
       },
-      notes: `سعر الصرف المعتمد بالجرد: $1 = ${exchangeRate.toLocaleString()} ل.ل • عدد الحركات في التقرير: ${filteredSales.length}`,
+      notes: `سعر الصرف المعتمد: $1 = ${exchangeRate.toLocaleString()} ل.ل • عدد الحركات: ${filteredSales.length}`,
       accentColor: '#FF7A00'
     });
   };
@@ -223,7 +275,7 @@ export default function Analytics({
           </button>
         </div>
 
-        {/* فلاتر الفترات الأربعة الصريحة: يومي، أسبوعي، شهري، سنوي */}
+        {/* فلاتر الفترات الأربع: يومي، أسبوعي، شهري، سنوي */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', marginBottom: '16px' }}>
           {[
             { id: 'daily', label: 'يومي' },
@@ -255,7 +307,7 @@ export default function Analytics({
         {/* كروت الإجماليات للفترة المحددة */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
           <div style={{ background: 'var(--bg-input)', padding: '14px', borderRadius: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>إجمالي المبيعات</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>إجمالي المبيعات المحصلة</div>
             <div style={{ fontSize: '18px', fontWeight: '900', marginTop: '4px', color: 'var(--text-main)' }}>
               ${totalSalesUSD.toFixed(2)}
             </div>
@@ -274,19 +326,43 @@ export default function Analytics({
           </div>
         </div>
 
-        {/* المخطط البياني المتفاعل مع كل فترة */}
+        {/* ملخص الديون المفصل */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+          <div style={{ background: 'var(--bg-card-sub)', padding: '10px 12px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ديون الزبائن:</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: unpaidCustomerDebtsUSD > 0 ? 'var(--red)' : 'var(--text-main)' }}>
+              ${unpaidCustomerDebtsUSD.toFixed(2)}
+            </span>
+          </div>
+
+          <div style={{ background: 'var(--bg-card-sub)', padding: '10px 12px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>رأس مال كروت معلق:</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: unpaidBoxDebtsUSD > 0 ? 'var(--orange-primary)' : 'var(--green)' }}>
+              ${unpaidBoxDebtsUSD.toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        {/* المخطط البياني للأرباح */}
         <div style={{ height: '170px', width: '100%', marginBottom: '14px' }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
-              <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={11} />
+            <BarChart data={chartData} margin={{ top: 10, right: 6, left: 6, bottom: 0 }}>
+              <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={10} interval={0} tickLine={false} />
               <Tooltip
                 formatter={(val) => [`$${parseFloat(val || 0).toFixed(2)}`, 'صافي الربح']}
+                labelFormatter={(label, payload) => {
+                  if (payload && payload[0] && payload[0].payload && payload[0].payload.fullName) {
+                    return payload[0].payload.fullName;
+                  }
+                  return label;
+                }}
                 contentStyle={{
                   background: 'var(--bg-card)',
                   border: '1px solid var(--border-color)',
                   borderRadius: '8px',
                   color: 'var(--text-main)',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
+                  direction: 'rtl'
                 }}
               />
               <Bar dataKey="profit" fill="var(--orange-primary)" radius={[6, 6, 0, 0]} />
@@ -299,23 +375,33 @@ export default function Analytics({
           <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--orange-primary)', marginBottom: '8px' }}>
             العمليات المندرجة بالجرد ({filteredSales.length}):
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
             {filteredSales.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '16px', fontSize: '11px', color: 'var(--text-muted)' }}>
                 لا توجد عمليات مسجلة في هذه الفترة
               </div>
             ) : (
-              filteredSales.slice(0, 10).map((s, idx) => (
-                <div key={idx} style={{ background: 'var(--bg-main)', padding: '8px 12px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <div>
-                    <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{s.customerName}</span>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginRight: '6px' }}>({s.operator?.toUpperCase() || s.itemName || 'رصيد'})</span>
+              filteredSales.slice(0, 15).map((s, idx) => {
+                const profitVal = s.profitUSD !== undefined ? parseFloat(s.profitUSD) : 0;
+                return (
+                  <div key={idx} style={{ background: 'var(--bg-main)', padding: '8px 12px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', border: '1px solid var(--border-color)' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{s.customerName || 'عام'}</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>({s.itemName || s.title})</span>
+                      </div>
+                      <div style={{ fontSize: '10px', color: profitVal > 0 ? 'var(--green)' : 'var(--orange-primary)', fontWeight: 'bold', marginTop: '2px' }}>
+                        {profitVal > 0 ? `صافي ربح: +$${profitVal.toFixed(2)}` : 'سداد تكلفة / رأس مال للمحفظة'}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontWeight: '900', color: 'var(--text-main)' }}>
+                        {parseFloat(s.sellingPrice).toLocaleString()} {s.currency === 'LBP' ? 'ل.ل' : '$'}
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>
-                    {parseFloat(s.sellingPrice).toLocaleString()} {s.currency === 'LBP' ? 'ل.ل' : '$'}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
