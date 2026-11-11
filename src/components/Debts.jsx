@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDateTime } from '../utils/dateFormatter';
+import { api } from '../services/api';
 import {
   BookOpen,
   Plus,
@@ -23,7 +24,8 @@ export default function Debts({
   sources = [],
   onUpdateDebts,
   onRecordDebtSale,
-  onUpdateSourceBalance
+  onUpdateSourceBalance,
+  onRefreshData
 }) {
   const [activeCategory, setActiveCategory] = useState('all'); // 'all' | 'customers' | 'merchants' | 'boxes'
   const [activeModal, setActiveModal] = useState(null); // 'add' | 'edit' | 'partial' | 'history'
@@ -148,50 +150,88 @@ export default function Debts({
     setActiveModal(null);
   };
 
-  const handleApplyPartial = (e) => {
+  // سداد دفعة جزئية وربطها بالسيرفر
+  const handleApplyPartial = async (e) => {
     e.preventDefault();
     const paidVal = parseFloat(partialPayment) || 0;
     if (paidVal <= 0 || !editingDebt) return;
 
-    const currentAmt = parseFloat(editingDebt.amount) || 0;
-    const remaining = Math.max(0, currentAmt - paidVal);
+    try {
+      await api.payDebt({
+        debtId: editingDebt.id,
+        amount: paidVal,
+        currency: editingDebt.currency || 'USD',
+        notes: 'تسديد دفعة على الحساب',
+        walletId: editingDebt.sourceWalletId || null
+      });
 
-    if (editingDebt.category === 'boxes' && editingDebt.sourceWalletId && onUpdateSourceBalance) {
-      const src = sources.find(s => s.id === editingDebt.sourceWalletId);
-      if (src) {
-        const addVal = editingDebt.currency === 'LBP' ? (paidVal / exchangeRate) : paidVal;
-        onUpdateSourceBalance(editingDebt.sourceWalletId, parseFloat(src.balance || 0) + addVal);
+      if (onRefreshData) {
+        await onRefreshData();
       }
+    } catch (err) {
+      console.error('Error applying partial payment:', err);
+      // تحديث محلي احتياطي في حال عدم الاتصال
+      const currentAmt = parseFloat(editingDebt.amount) || 0;
+      const remaining = Math.max(0, currentAmt - paidVal);
+
+      if (editingDebt.category === 'boxes' && editingDebt.sourceWalletId && onUpdateSourceBalance) {
+        const src = sources.find(s => s.id === editingDebt.sourceWalletId);
+        if (src) {
+          const addVal = editingDebt.currency === 'LBP' ? (paidVal / exchangeRate) : paidVal;
+          onUpdateSourceBalance(editingDebt.sourceWalletId, parseFloat(src.balance || 0) + addVal);
+        }
+      }
+
+      const paymentEntry = {
+        id: `pay_${Date.now()}`,
+        date: new Date().toISOString(),
+        type: 'payment',
+        amount: paidVal,
+        currency: editingDebt.currency,
+        remainingAfter: remaining,
+        notes: 'تسديد دفعة على الحساب'
+      };
+
+      const updated = debts.map(d => {
+        if (d.id === editingDebt.id) {
+          return {
+            ...d,
+            amount: parseFloat(remaining.toFixed(2)),
+            paid: remaining <= 0.01,
+            history: [...(d.history || []), paymentEntry]
+          };
+        }
+        return d;
+      });
+
+      saveToStorage(updated);
     }
 
-    const paymentEntry = {
-      id: `pay_${Date.now()}`,
-      date: new Date().toISOString(),
-      type: 'payment',
-      amount: paidVal,
-      currency: editingDebt.currency,
-      remainingAfter: remaining,
-      notes: 'تسديد دفعة على الحساب'
-    };
-
-    const updated = debts.map(d => {
-      if (d.id === editingDebt.id) {
-        return {
-          ...d,
-          amount: parseFloat(remaining.toFixed(2)),
-          paid: remaining <= 0.01,
-          history: [...(d.history || []), paymentEntry]
-        };
-      }
-      return d;
-    });
-
-    saveToStorage(updated);
     setActiveModal(null);
   };
 
-  const handleTogglePaid = (debt) => {
+  // سداد كامل أو إعادة فتح الذمة مع السيرفر
+  const handleTogglePaid = async (debt) => {
     const isNowPaid = !debt.paid;
+
+    if (isNowPaid) {
+      try {
+        await api.payDebt({
+          debtId: debt.id,
+          amount: debt.amount,
+          currency: debt.currency || 'USD',
+          notes: 'تم تسديد كامل الذمة',
+          walletId: debt.sourceWalletId || null
+        });
+
+        if (onRefreshData) {
+          await onRefreshData();
+          return;
+        }
+      } catch (err) {
+        console.error('Error paying full debt:', err);
+      }
+    }
 
     if (isNowPaid && debt.category === 'boxes' && debt.sourceWalletId && onUpdateSourceBalance) {
       const src = sources.find(s => s.id === debt.sourceWalletId);
@@ -344,7 +384,7 @@ export default function Debts({
           className="btn-primary"
           style={{ width: 'auto', padding: '8px 14px', fontSize: '12px', borderRadius: '10px' }}
         >
-          <Plus size={14} />  تسجيل دين جديد
+          <Plus size={14} /> تسجيل دين جديد
         </button>
       </div>
 
@@ -456,7 +496,6 @@ export default function Debts({
                   </div>
                 </div>
 
-                {/* شريط الإيضاح لديون الصناديق أو الديون التي سدد جزء منها */}
                 {(isBoxDebt || repaidAmt > 0) && (
                   <div style={{ background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', border: '1px solid var(--border-color)' }}>
                     <span style={{ color: 'var(--text-muted)' }}>
