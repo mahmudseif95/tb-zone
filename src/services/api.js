@@ -8,154 +8,75 @@ const getHeaders = () => {
     };
 };
 
+const request = async (endpoint, options = {}) => {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers: { ...getHeaders(), ...(options.headers || {}) }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'خطأ في الاتصال بالسيرفر');
+    return data;
+};
+
 export const api = {
     // 1. المصادقة والتوثيق
     login: async (email, password) => {
-        const res = await fetch(`${API_BASE}/auth/login`, {
+        const data = await request('/auth/login', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل تسجيل الدخول');
         localStorage.setItem('zt_token', data.token);
         return data;
     },
 
     register: async (shopData) => {
-        const res = await fetch(`${API_BASE}/auth/register`, {
+        const data = await request('/auth/register', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(shopData)
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل إنشاء الحساب');
         localStorage.setItem('zt_token', data.token);
         return data;
     },
 
-    logout: () => {
-        localStorage.removeItem('zt_token');
-    },
+    logout: () => localStorage.removeItem('zt_token'),
 
-    // 2. جلب وتحديث بيانات المحل
-    fetchBootstrapData: async () => {
-        const res = await fetch(`${API_BASE}/data/bootstrap`, {
-            headers: getHeaders()
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل جلب البيانات');
-        return data;
-    },
-
-    updateBrand: async (brandPayload) => {
-        const res = await fetch(`${API_BASE}/data/brand`, {
-            method: 'PUT',
-            headers: getHeaders(),
-            body: JSON.stringify(brandPayload)
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل تحديث بيانات المحل');
-        return data;
-    },
-
-    importLocalData: async (payload) => {
-        const res = await fetch(`${API_BASE}/data/import-local`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل ترحيل البيانات');
-        return data;
-    },
+    // 2. البيانات العامة وهوية المحل
+    fetchBootstrapData: () => request('/data/bootstrap'),
+    updateBrand: (brandPayload) => request('/data/brand', { method: 'PUT', body: JSON.stringify(brandPayload) }),
+    importLocalData: (payload) => request('/data/import-local', { method: 'POST', body: JSON.stringify(payload) }),
+    updateExchangeRate: (rate) => request('/operations/exchange-rate', { method: 'PUT', body: JSON.stringify({ rate }) }),
 
     // 3. إدارة الصناديق والمحافظ (Sources)
-    addSource: async (sourceData) => {
-        const res = await fetch(`${API_BASE}/operations/source`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(sourceData)
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل إضافة المحفظة');
-        return data;
-    },
+    addSource: (sourceData) => request('/operations/source', { method: 'POST', body: JSON.stringify(sourceData) }),
+    updateSource: (id, fields) => request(`/operations/source/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
+    deleteSource: (id) => request(`/operations/source/${id}`, { method: 'DELETE' }),
+    recordWalletTx: (walletId, tx) => request('/operations/wallet-tx', { method: 'POST', body: JSON.stringify({ walletId, tx }) }),
+    walletTransfer: (payload) => request('/operations/wallet-transfer', { method: 'POST', body: JSON.stringify(payload) }),
 
-    updateSource: async (id, fields) => {
-        const res = await fetch(`${API_BASE}/operations/source/${id}`, {
-            method: 'PUT',
-            headers: getHeaders(),
-            body: JSON.stringify(fields)
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل تحديث المحفظة');
-        return data;
-    },
+    // 4. الشرائح ودفعات الرصيد
+    addSim: (simData) => request('/operations/sim', { method: 'POST', body: JSON.stringify(simData) }),
+    updateSim: (id, fields) => request(`/operations/sim/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
+    deleteSim: (id) => request(`/operations/sim/${id}`, { method: 'DELETE' }),
+    transferSimBalance: (payload) => request('/operations/sim-transfer', { method: 'POST', body: JSON.stringify(payload) }),
+    executeSale: (salePayload) => request('/operations/sale', { method: 'POST', body: JSON.stringify(salePayload) }),
 
-    deleteSource: async (sourceId) => {
-        const res = await fetch(`${API_BASE}/operations/source/${sourceId}`, {
-            method: 'DELETE',
-            headers: getHeaders()
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل حذف المحفظة');
-        return data;
-    },
+    // 5. الخطوط المسكرة
+    addLine: (lineData) => request('/operations/line', { method: 'POST', body: JSON.stringify(lineData) }),
+    updateLine: (id, fields) => request(`/operations/line/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
+    deleteLine: (id) => request(`/operations/line/${id}`, { method: 'DELETE' }),
 
-    // 4. العمليات المباشرة على السيرفر
-    updateExchangeRate: async (rate) => {
-        const res = await fetch(`${API_BASE}/operations/exchange-rate`, {
-            method: 'PUT',
-            headers: getHeaders(),
-            body: JSON.stringify({ rate })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل تحديث سعر الصرف');
-        return data;
-    },
+    // 6. Alfa Gift & U-Share
+    executeAlfaGiftSale: (giftPayload) => request('/operations/alfa-gift-sale', { method: 'POST', body: JSON.stringify(giftPayload) }),
 
-    executeSale: async (salePayload) => {
-        const res = await fetch(`${API_BASE}/operations/sale`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(salePayload)
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل تسجيل المبيع');
-        return data;
-    },
+    // 7. الديون (مع عزل العملة التام)
+    addDebt: (debtData) => request('/operations/debt', { method: 'POST', body: JSON.stringify(debtData) }),
+    updateDebt: (id, fields) => request(`/operations/debt/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
+    deleteDebt: (id) => request(`/operations/debt/${id}`, { method: 'DELETE' }),
+    payDebt: (debtPaymentPayload) => request('/operations/debt-payment', { method: 'POST', body: JSON.stringify(debtPaymentPayload) }),
 
-    recordWalletTx: async (walletId, tx) => {
-        const res = await fetch(`${API_BASE}/operations/wallet-tx`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify({ walletId, tx })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل تسجيل حركة المحفظة');
-        return data;
-    },
-
-    executeAlfaGiftSale: async (giftPayload) => {
-        const res = await fetch(`${API_BASE}/operations/alfa-gift-sale`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(giftPayload)
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل تسجيل عملية Alfa Gift');
-        return data;
-    },
-
-    payDebt: async (debtPaymentPayload) => {
-        const res = await fetch(`${API_BASE}/operations/debt-payment`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(debtPaymentPayload)
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'فشل سداد الدين');
-        return data;
-    }
+    // 8. الزبائن والمصاريف
+    addCustomer: (custData) => request('/operations/customer', { method: 'POST', body: JSON.stringify(custData) }),
+    updateCustomer: (id, fields) => request(`/operations/customer/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
+    deleteCustomer: (id) => request(`/operations/customer/${id}`, { method: 'DELETE' }),
+    addExpense: (expData) => request('/operations/expense', { method: 'POST', body: JSON.stringify(expData) })
 };
