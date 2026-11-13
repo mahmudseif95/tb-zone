@@ -4,7 +4,7 @@ import LoginScreen from './components/LoginScreen';
 import RechargeHub from './components/RechargeHub';
 import AlfaGift from './components/AlfaGift';
 import SalesModal from './components/SalesModal';
-import LockedLines from './components/LockedLines';
+import LockedLines from './components/lines/LockedLines';
 import Analytics from './components/Analytics';
 import Customers from './components/Customers';
 import Debts from './components/Debts';
@@ -13,9 +13,11 @@ import SettingsModal from './components/SettingsModal';
 import QuickToolsModal from './components/QuickToolsModal';
 import ExpiryAlertBanner from './components/ExpiryAlertBanner';
 import BottomNav from './components/BottomNav';
-import WalletsManager from './components/WalletsManager';
+import WalletsManager from './components/wallets/WalletsManager';
 import SplashScreen from './components/SplashScreen';
 import ActionToast from './components/ActionToast';
+import ShopSetupModal from './components/ShopSetupModal';
+import DeveloperFooter from './components/DeveloperFooter';
 import { formatDateTime } from './utils/dateFormatter';
 import { api } from './services/api';
 import {
@@ -32,7 +34,7 @@ import {
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('zt_token')));
-  const [isLoadingBootstrap, setIsLoadingBootstrap] = useState(false);
+  const [hasLoadedServerData, setHasLoadedServerData] = useState(false);
 
   const [showSplash, setShowSplash] = useState(true);
   const [currentTab, setCurrentTab] = useState('home');
@@ -57,9 +59,9 @@ export default function App() {
   const [brandConfig, setBrandConfig] = useState(() => {
     const saved = localStorage.getItem('tb_brand_config');
     return saved ? JSON.parse(saved) : {
-      name: 'ZOLFA TECH',
-      subtitle: 'OS TELECOM',
-      phone: '78877026',
+      name: '',
+      subtitle: '',
+      phone: '',
       logo: ''
     };
   });
@@ -129,7 +131,6 @@ export default function App() {
   // جلب كافة بيانات المتجر من MySQL
   const loadDataFromServer = useCallback(async () => {
     try {
-      setIsLoadingBootstrap(true);
       const data = await api.fetchBootstrapData();
       if (data.brandConfig) setBrandConfig(data.brandConfig);
       if (data.exchangeRate) {
@@ -143,14 +144,14 @@ export default function App() {
       if (data.customers) setCustomers(data.customers);
       if (data.expenses) setExpenses(data.expenses);
       if (data.salesHistory) setSalesHistory(data.salesHistory);
+      setHasLoadedServerData(true);
     } catch (err) {
       console.error('Error fetching data from server:', err);
       if (err.message && (err.message.includes('انتهت الجلسة') || err.message.includes('تسجيل الدخول') || err.message.includes('مرفوض'))) {
         api.logout();
         setIsAuthenticated(false);
+        setHasLoadedServerData(false);
       }
-    } finally {
-      setIsLoadingBootstrap(false);
     }
   }, []);
 
@@ -173,10 +174,14 @@ export default function App() {
     localStorage.setItem('tb_sales_history', JSON.stringify(salesHistory));
   }, [brandConfig, exchangeRate, sims, sources, lines, debts, customers, expenses, salesHistory]);
 
-  const handleSaveRate = async () => {
-    const val = parseFloat(tempRate);
+  // ==========================================
+  // 1. سعر الصرف والمحافظ والصناديق
+  // ==========================================
+  const handleSaveRate = async (customVal = null) => {
+    const val = customVal !== null ? parseFloat(customVal) : parseFloat(tempRate);
     if (val && val > 0) {
       setExchangeRate(val);
+      setTempRate(val.toString());
       setIsEditingRate(false);
       try {
         await api.updateExchangeRate(val);
@@ -187,25 +192,24 @@ export default function App() {
     }
   };
 
-  const handleUpdateSourceBalance = (sourceId, newBalanceUSD, newBalanceLBP = null) => {
-    setSources(prev => prev.map(s => {
-      if (s.id === sourceId) {
-        return {
-          ...s,
-          balanceUSD: newBalanceUSD,
-          balance: newBalanceUSD,
-          ...(newBalanceLBP !== null ? { balanceLBP: newBalanceLBP } : {})
-        };
-      }
-      return s;
-    }));
-    showNotification('تم تعديل رصيد الصندوق بنجاح');
+  const handleUpdateSourceBalance = async (sourceId, newBalanceUSD, newBalanceLBP = null) => {
+    try {
+      await api.updateSource(sourceId, {
+        balanceUSD: newBalanceUSD,
+        ...(newBalanceLBP !== null ? { balanceLBP: newBalanceLBP } : {})
+      });
+      await loadDataFromServer();
+      showNotification('تم تعديل رصيد الصندوق بنجاح');
+    } catch (err) {
+      console.error('Update balance error:', err);
+      showNotification('خطأ في تعديل رصيد الصندوق بالسيرفر', err.message);
+    }
   };
 
   const handleAddSource = async (name, initialUSD = 0, initialLBP = 0) => {
     try {
       await api.addSource({ name, initialUSD, initialLBP });
-      await loadDataFromServer(); // إعادة جلب البيانات فوراً من MySQL
+      await loadDataFromServer();
       showNotification('تمت إضافة محفظة جديدة بنجاح', name);
     } catch (err) {
       console.error('Add source error:', err);
@@ -226,7 +230,6 @@ export default function App() {
 
   const handleDeleteSource = async (id) => {
     if (!window.confirm('هل أنت متأكد من حذف هذه المحفظة نهائياً من قاعدة البيانات؟')) return;
-
     try {
       await api.deleteSource(id);
       await loadDataFromServer();
@@ -234,6 +237,194 @@ export default function App() {
     } catch (err) {
       console.error('Delete source error:', err);
       showNotification('خطأ في حذف المحفظة بالسيرفر', err.message);
+    }
+  };
+
+  const handleRecordWalletTx = async (walletId, tx) => {
+    try {
+      await api.recordWalletTx(walletId, { ...tx, daysFxRate: exchangeRate });
+      await loadDataFromServer();
+      showNotification('تم تسجيل حركة الصندوق بنجاح', tx.type === 'deposit' ? 'إيداع نقدي' : 'سحب نقدي');
+    } catch (err) {
+      console.error('Wallet TX error:', err);
+      showNotification('خطأ في حفظ حركة الصندوق بالسيرفر', err.message);
+    }
+  };
+
+  // ==========================================
+  // 2. الشرائح ودفعات الرصيد (SIMs)
+  // ==========================================
+  const handleAddSimBatch = async (newSim) => {
+    try {
+      await api.addSim(newSim);
+      await loadDataFromServer();
+      showNotification('تمت إضافة الشريحة والرصيد بنجاح', newSim.name);
+    } catch (err) {
+      console.error('Add SIM error:', err);
+      showNotification('خطأ في حفظ الشريحة بالسيرفر', err.message);
+    }
+  };
+
+  const handleUpdateSim = async (id, fields) => {
+    try {
+      const existingSim = sims.find(s => s.id === id);
+      let newBatch = null;
+
+      if (fields.batches && existingSim) {
+        const oldIds = new Set((existingSim.batches || []).map(b => b.id));
+        const added = fields.batches.find(b => !oldIds.has(b.id));
+        if (added) {
+          newBatch = added;
+        }
+      }
+
+      await api.updateSim(id, { ...fields, ...(newBatch ? { newBatch } : {}) });
+      await loadDataFromServer();
+      showNotification('تم تحديث بيانات الشريحة بنجاح');
+    } catch (err) {
+      console.error('Update SIM error:', err);
+      showNotification('خطأ في تحديث الشريحة بالسيرفر', err.message);
+    }
+  };
+
+  const handleDeleteSim = async (id) => {
+    try {
+      await api.deleteSim(id);
+      await loadDataFromServer();
+      showNotification('تم حذف الشريحة بنجاح');
+    } catch (err) {
+      console.error('Delete SIM error:', err);
+      showNotification('خطأ في حذف الشريحة بالسيرفر', err.message);
+    }
+  };
+
+  const handleTransferSimBalance = async (fromId, toId, credits) => {
+    try {
+      await api.transferSimBalance({ fromSimId: fromId, toSimId: toId, credits, tax: 0.14 });
+      await loadDataFromServer();
+      showNotification('تم تحويل الرصيد بين الشرائح بنجاح', `$${credits} رصيد`);
+    } catch (err) {
+      console.error('Transfer SIM balance error:', err);
+      showNotification('خطأ أثناء تحويل الرصيد', err.message);
+    }
+  };
+
+  // ==========================================
+  // 3. الخطوط المسكرة والمفتوحة (Lines)
+  // ==========================================
+  const handleAddLine = async (newLine) => {
+    try {
+      await api.addLine(newLine);
+      await loadDataFromServer();
+      showNotification('تمت إضافة الخط بنجاح');
+    } catch (err) {
+      console.error('Add line error:', err);
+      showNotification('خطأ في إضافة الخط بالسيرفر', err.message);
+    }
+  };
+
+  const handleUpdateLine = async (id, updater) => {
+    try {
+      const currentLine = lines.find(l => l.id === id);
+      if (!currentLine) return;
+      const updatedLine = typeof updater === 'function' ? updater(currentLine) : { ...currentLine, ...updater };
+      await api.updateLine(id, updatedLine);
+      await loadDataFromServer();
+      showNotification('تم تحديث بيانات الخط بنجاح');
+    } catch (err) {
+      console.error('Update line error:', err);
+      showNotification('خطأ في تحديث الخط بالسيرفر', err.message);
+    }
+  };
+
+  const handleDeleteLine = async (id) => {
+    try {
+      await api.deleteLine(id);
+      await loadDataFromServer();
+      showNotification('تم حذف الخط بنجاح');
+    } catch (err) {
+      console.error('Delete line error:', err);
+      showNotification('خطأ في حذف الخط بالسيرفر', err.message);
+    }
+  };
+
+  const handleBulkUpdateLines = async (updaterOrList) => {
+    const nextList = typeof updaterOrList === 'function' ? updaterOrList(lines) : updaterOrList;
+    setLines(nextList);
+    try {
+      for (const updated of nextList) {
+        const prev = lines.find(l => l.id === updated.id);
+        if (prev && JSON.stringify(prev) !== JSON.stringify(updated)) {
+          await api.updateLine(updated.id, updated);
+        }
+      }
+      await loadDataFromServer();
+    } catch (err) {
+      console.error('Bulk update lines error:', err);
+    }
+  };
+
+  // ==========================================
+  // 4. عمليات البيع و Alfa Gift و U-Share
+  // ==========================================
+  const handleExecuteAlfaGiftSale = async (giftData) => {
+    try {
+      await api.executeAlfaGiftSale(giftData);
+      await loadDataFromServer();
+      showNotification(
+        giftData.mode === 'direct_gift' ? 'تم تثبيت بيع Alfa Gift بنجاح' : 'تم تثبيت وتوزيع حصص U-Share بنجاح',
+        'تم تحديث الأرصدة والديون في قاعدة البيانات'
+      );
+    } catch (err) {
+      console.error('Alfa Gift error:', err);
+      showNotification('خطأ أثناء تثبيت العملية', err.message);
+    }
+  };
+
+  const handleConfirmSale = async (confirmedData) => {
+    try {
+      await api.executeSale({ ...confirmedData, exchangeRate });
+      await loadDataFromServer();
+      setModalOpen(false);
+      showNotification('تمت عملية البيع بنجاح', confirmedData.itemName);
+    } catch (err) {
+      console.error('Sale error:', err);
+      showNotification('خطأ أثناء حفظ العملية', err.message);
+    }
+  };
+
+  const handleRecordSaleFromLine = async (saleItem) => {
+    try {
+      const targetLineId = saleItem.targetLineId || saleItem.lockedLineId || null;
+      await api.executeAlfaGiftSale({
+        mode: 'direct_gift',
+        simId: null,
+        selectedBatchId: null,
+        deductUSD: 0,
+        lockedLineId: targetLineId,
+        totalGB: saleItem.gb || 0,
+        recipients: [
+          {
+            itemName: saleItem.itemName,
+            name: (saleItem.customerName || '').trim() || 'عام',
+            phone: saleItem.customerPhone || '',
+            customerType: saleItem.customerType || 'customers',
+            gb: saleItem.gb || '',
+            price: parseFloat(saleItem.sellingPrice) || 0,
+            currency: saleItem.currency || 'USD',
+            paymentType: saleItem.paymentType || (saleItem.isDebt ? 'debt' : 'cash'),
+            paidAmount: saleItem.paidAmount,
+            remainingDebt: saleItem.remainingDebt,
+            isDebt: Boolean(saleItem.isDebt)
+          }
+        ],
+        exchangeRate
+      });
+      await loadDataFromServer();
+      showNotification('تم تسجيل حصة المشترك بنجاح', saleItem.itemName);
+    } catch (err) {
+      console.error('Record sale from line error:', err);
+      showNotification('خطأ أثناء تسجيل حصة المشترك', err.message);
     }
   };
 
@@ -251,180 +442,67 @@ export default function App() {
     setSalesHistory(prev => [recordWithProfit, ...prev]);
   };
 
-  // تسجيل حركات المحافظ مع السيرفر
-  const handleRecordWalletTx = async (walletId, tx) => {
+  // ==========================================
+  // 5. الزبائن والمصاريف
+  // ==========================================
+  const handleAddCustomer = async (c) => {
     try {
-      await api.recordWalletTx(walletId, { ...tx, daysFxRate: exchangeRate });
+      await api.addCustomer(c);
       await loadDataFromServer();
-      showNotification('تم تسجيل حركة الصندوق بنجاح', tx.type === 'deposit' ? 'إيداع نقدي' : 'سحب نقدي');
+      showNotification('تمت إضافة الزبون بنجاح', c.name);
     } catch (err) {
-      console.error('Wallet TX error:', err);
-      showNotification('خطأ في حفظ حركة الصندوق بالسيرفر', err.message);
+      console.error('Add customer error:', err);
+      showNotification('خطأ في إضافة الزبون بالسيرفر', err.message);
     }
   };
 
-  // بيع حصص ALFA GIFT مع السيرفر
-  const handleExecuteAlfaGiftSale = async (giftData) => {
+  const handleUpdateCustomer = async (id, fields) => {
     try {
-      await api.executeAlfaGiftSale(giftData);
+      await api.updateCustomer(id, fields);
       await loadDataFromServer();
-      showNotification('تم تثبيت خدمة ALFA GIFT', 'سُددت المحافظ وحُفظت ديون المشتركين بدقة');
+      showNotification('تم تحديث بيانات الزبون');
     } catch (err) {
-      console.error('Alfa Gift error:', err);
-      showNotification('خطأ أثناء تثبيت Alfa Gift', err.message);
+      console.error('Update customer error:', err);
+      showNotification('خطأ في تحديث الزبون', err.message);
     }
   };
 
-  // تثبيت بيع الرصيد مع السيرفر
-  const handleConfirmSale = async (confirmedData) => {
+  const handleDeleteCustomer = async (id) => {
     try {
-      await api.executeSale({ ...confirmedData, exchangeRate });
+      await api.deleteCustomer(id);
       await loadDataFromServer();
-      setModalOpen(false);
-      showNotification('تمت عملية البيع بنجاح', confirmedData.itemName);
+      showNotification('تم حذف الزبون بنجاح');
     } catch (err) {
-      console.error('Sale error:', err);
-      showNotification('خطأ أثناء حفظ العملية', err.message);
+      console.error('Delete customer error:', err);
+      showNotification('خطأ في حذف الزبون بالسيرفر', err.message);
     }
   };
 
-  const handleRecordSaleFromLine = (saleItem) => {
-    const saleUSDVal = saleItem.currency === 'LBP' ? (parseFloat(saleItem.sellingPrice) / exchangeRate) : parseFloat(saleItem.sellingPrice);
-    const targetLineId = saleItem.targetLineId || saleItem.lockedLineId;
-
-    let costAssigned = 0;
-    let profitUSDVal = saleUSDVal;
-    let walletRefundMap = {};
-
-    setDebts(prevDebts => {
-      let updatedDebts = [...prevDebts];
-
-      if (targetLineId) {
-        let remSale = saleUSDVal;
-        const targetLine = lines.find(l => l.id === targetLineId);
-        const lineLabel = targetLine ? `خط #${targetLine.slotNumber || 1}` : 'خط';
-
-        const matchingDebts = updatedDebts
-          .filter(d => !d.paid && d.category === 'boxes' && d.targetLineId === targetLineId)
-          .sort((a, b) => (new Date(a.createdAt || a.dueDate || 0)) - (new Date(b.createdAt || b.dueDate || 0)));
-
-        if (matchingDebts.length > 0) {
-          updatedDebts = updatedDebts.map(d => {
-            if (!d.paid && d.category === 'boxes' && d.targetLineId === targetLineId && remSale > 0) {
-              const dRem = parseFloat(d.amount) || 0;
-              if (dRem > 0) {
-                const pay = Math.min(remSale, dRem);
-                remSale -= pay;
-                costAssigned += pay;
-
-                if (d.sourceWalletId) {
-                  walletRefundMap[d.sourceWalletId] = (walletRefundMap[d.sourceWalletId] || 0) + pay;
-                }
-
-                const newAmount = parseFloat((dRem - pay).toFixed(2));
-                return {
-                  ...d,
-                  amount: newAmount,
-                  paid: newAmount <= 0.01,
-                  history: [
-                    ...(d.history || []),
-                    {
-                      id: `tx_pay_${Date.now()}`,
-                      date: new Date().toISOString(),
-                      type: 'payment',
-                      amount: pay,
-                      currency: 'USD',
-                      notes: `سداد من مبيع حصة ${lineLabel}`
-                    }
-                  ]
-                };
-              }
-            }
-            return d;
-          });
-        }
-      }
-
-      if (saleItem.isDebt) {
-        updatedDebts.unshift({
-          id: Date.now().toString(),
-          category: 'customers',
-          name: saleItem.customerName || 'عميل',
-          amount: parseFloat(saleItem.sellingPrice),
-          originalAmount: parseFloat(saleItem.sellingPrice),
-          currency: saleItem.currency || 'USD',
-          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          paid: false,
-          notes: saleItem.itemName,
-          createdAt: new Date().toISOString(),
-          history: [{
-            id: `tx_${Date.now()}`,
-            date: new Date().toISOString(),
-            type: 'debt',
-            amount: parseFloat(saleItem.sellingPrice),
-            currency: saleItem.currency || 'USD',
-            notes: saleItem.itemName
-          }]
-        });
-      }
-
-      return updatedDebts;
-    });
-
-    profitUSDVal = Math.max(0, parseFloat((saleUSDVal - costAssigned).toFixed(2)));
-
-    if (Object.keys(walletRefundMap).length > 0) {
-      setSources(prev => prev.map(s => {
-        if (walletRefundMap[s.id]) {
-          const refund = walletRefundMap[s.id];
-          const curUSD = parseFloat(s.balanceUSD ?? s.balance ?? 0);
-          const updatedUSD = parseFloat((curUSD + refund).toFixed(2));
-          return {
-            ...s,
-            balanceUSD: updatedUSD,
-            balance: updatedUSD,
-            ledger: [
-              {
-                id: `tx_return_${Date.now()}_${s.id}`,
-                type: 'deposit',
-                itemName: `استرداد تكلفة حصة من خط مسكر`,
-                amount: refund,
-                currency: 'USD',
-                balanceAfterUSD: updatedUSD,
-                date: new Date().toISOString()
-              },
-              ...(s.ledger || [])
-            ]
-          };
-        }
-        return s;
-      }));
+  const handleAddExpense = async (exp) => {
+    try {
+      await api.addExpense(exp);
+      await loadDataFromServer();
+      showNotification('تم تسجيل المصروف بنجاح', exp.title);
+    } catch (err) {
+      console.error('Add expense error:', err);
+      showNotification('خطأ في تسجيل المصروف بالسيرفر', err.message);
     }
+  };
 
-    const saleWithDate = {
-      ...saleItem,
-      costUSD: parseFloat(costAssigned.toFixed(2)),
-      profitUSD: parseFloat(profitUSDVal.toFixed(2)),
-      date: saleItem.date || new Date().toISOString()
-    };
-    setSalesHistory(prev => [saleWithDate, ...prev]);
-
-    const cleanName = (saleItem.customerName || '').trim();
-    if (cleanName && !['تغذية خط مسكر', 'عام', 'حركة مباشرة'].includes(cleanName.toLowerCase())) {
-      setCustomers(prev => {
-        if (!prev.some(c => c.name?.toLowerCase() === cleanName.toLowerCase())) {
-          return [{
-            id: Date.now().toString(),
-            name: cleanName,
-            phone: saleItem.customerPhone || '',
-            address: ''
-          }, ...prev];
-        }
-        return prev;
-      });
-    }
-
-    showNotification('تم تسجيل حصة المشترك بنجاح', saleItem.itemName);
+  const handleLogoutClean = () => {
+    api.logout();
+    localStorage.removeItem('tb_brand_config');
+    localStorage.removeItem('tb_sources');
+    localStorage.removeItem('tb_sims');
+    localStorage.removeItem('tb_locked_lines');
+    localStorage.removeItem('tb_debts');
+    localStorage.removeItem('tb_customers');
+    localStorage.removeItem('tb_expenses');
+    localStorage.removeItem('tb_sales_history');
+    setBrandConfig({ name: '', subtitle: '', phone: '', logo: '' });
+    setHasLoadedServerData(false);
+    setIsAuthenticated(false);
+    setShowSettingsModal(false);
   };
 
   const totalBalanceUSD = sources.reduce((acc, curr) => acc + (parseFloat(curr.balanceUSD ?? curr.balance ?? 0)), 0).toFixed(2);
@@ -432,7 +510,14 @@ export default function App() {
 
   // في حال لم يكن مسجل الدخول، يتم عرض شاشة الدخول أولاً
   if (!isAuthenticated) {
-    return <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />;
+    return (
+      <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: 'var(--bg-main)' }}>
+        <div style={{ flex: 1 }}>
+          <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />
+        </div>
+        <DeveloperFooter />
+      </div>
+    );
   }
 
   return (
@@ -441,10 +526,16 @@ export default function App() {
       {showSplash && (
         <SplashScreen
           logo={brandConfig.logo}
-          brandName={brandConfig.name}
+          brandName={brandConfig.name || 'TELECOM OS'}
           onFinish={() => setShowSplash(false)}
         />
       )}
+
+      {/* نافذة إعداد هوية المتجر عند أول دخول لأي زبون */}
+      <ShopSetupModal
+        isOpen={hasLoadedServerData && !brandConfig?.name?.trim()}
+        onComplete={(newBrand) => setBrandConfig(prev => ({ ...prev, ...newBrand }))}
+      />
 
       {toast && (
         <ActionToast
@@ -497,11 +588,13 @@ export default function App() {
 
             <div>
               <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: 'var(--orange-primary)' }}>
-                {brandConfig.name}
+                {brandConfig.name || 'متجر الاتصالات'}
               </h1>
-              <p style={{ margin: 0, fontSize: '9px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
-                {brandConfig.subtitle}
-              </p>
+              {brandConfig.subtitle && (
+                <p style={{ margin: 0, fontSize: '9px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
+                  {brandConfig.subtitle}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -522,7 +615,7 @@ export default function App() {
                   style={{ width: '70px', padding: '2px 4px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--orange-primary)', background: 'var(--bg-main)', color: 'var(--text-main)', fontWeight: 'bold' }}
                   autoFocus
                 />
-                <button onClick={handleSaveRate} style={{ background: 'var(--orange-primary)', color: '#fff', border: 'none', borderRadius: '6px', padding: '3px 6px', cursor: 'pointer' }}>
+                <button onClick={() => handleSaveRate()} style={{ background: 'var(--orange-primary)', color: '#fff', border: 'none', borderRadius: '6px', padding: '3px 6px', cursor: 'pointer' }}>
                   <Check size={12} />
                 </button>
               </div>
@@ -714,8 +807,16 @@ export default function App() {
             onUpdateSource={handleUpdateSource}
             onDeleteSource={handleDeleteSource}
             onRecordWalletTx={handleRecordWalletTx}
-            onUpdateLines={setLines}
-            onAddDebt={(newDebt) => setDebts(prev => [newDebt, ...prev])}
+            onUpdateLines={handleBulkUpdateLines}
+            onRefreshData={loadDataFromServer}
+            onAddDebt={async (newDebt) => {
+              try {
+                await api.addDebt({ ...newDebt, sourceWalletId: null });
+                await loadDataFromServer();
+              } catch (err) {
+                console.error('Add box debt error:', err);
+              }
+            }}
             exchangeRate={exchangeRate}
           />
         )}
@@ -723,15 +824,15 @@ export default function App() {
         {currentTab === 'recharge' && (
           <RechargeHub
             sims={sims}
-            onAddSimBatch={(newSim) => setSims([newSim, ...sims])}
-            onUpdateSim={(id, fields) => setSims(sims.map(s => s.id === id ? { ...s, ...fields } : s))}
-            onDeleteSim={(id) => setSims(sims.filter(s => s.id !== id))}
+            onAddSimBatch={handleAddSimBatch}
+            onUpdateSim={handleUpdateSim}
+            onDeleteSim={handleDeleteSim}
             onExecuteMultiSale={(saleData) => {
               setCurrentTx(saleData);
               setModalOpen(true);
             }}
             exchangeRate={exchangeRate}
-            onUpdateExchangeRate={(r) => setExchangeRate(r)}
+            onUpdateExchangeRate={(r) => handleSaveRate(r)}
           />
         )}
 
@@ -739,6 +840,7 @@ export default function App() {
           <AlfaGift
             sims={sims}
             lockedLines={lines}
+            customers={customers}
             onExecuteAlfaGiftSale={handleExecuteAlfaGiftSale}
             exchangeRate={exchangeRate}
           />
@@ -748,9 +850,9 @@ export default function App() {
           <LockedLines
             lines={lines}
             customers={customers}
-            onAddLine={(l) => setLines([l, ...lines])}
-            onUpdateLine={(id, updater) => setLines(lines.map(l => l.id === id ? updater(l) : l))}
-            onDeleteLine={(id) => setLines(lines.filter(l => l.id !== id))}
+            onAddLine={handleAddLine}
+            onUpdateLine={handleUpdateLine}
+            onDeleteLine={handleDeleteLine}
             onRecordSaleFromLine={handleRecordSaleFromLine}
             exchangeRate={exchangeRate}
           />
@@ -783,13 +885,15 @@ export default function App() {
             customers={customers}
             salesHistory={salesHistory}
             debts={debts}
-            onAddCustomer={(c) => setCustomers([c, ...customers])}
-            onUpdateCustomer={(id, f) => setCustomers(customers.map(c => c.id === id ? { ...c, ...f } : c))}
-            onDeleteCustomer={(id) => setCustomers(customers.filter(c => c.id !== id))}
+            onAddCustomer={handleAddCustomer}
+            onUpdateCustomer={handleUpdateCustomer}
+            onDeleteCustomer={handleDeleteCustomer}
             brandConfig={brandConfig}
             exchangeRate={exchangeRate}
           />
         )}
+
+        <DeveloperFooter />
       </main>
 
       <BottomNav
@@ -810,11 +914,7 @@ export default function App() {
             console.error('Update brand error:', err);
           }
         }}
-        onLogout={() => {
-          api.logout();
-          setIsAuthenticated(false);
-          setShowSettingsModal(false);
-        }}
+        onLogout={handleLogoutClean}
         onResetAllData={() => { localStorage.clear(); window.location.reload(); }}
       />
 
@@ -823,30 +923,12 @@ export default function App() {
         onClose={() => setShowToolsModal(false)}
         exchangeRate={exchangeRate}
         sims={sims}
-        onTransferBalance={(fromId, toId, credits) => {
-          const tax = 0.14;
-          setSims(sims.map(s => {
-            const curBal = (s.batches && s.batches.length > 0)
-              ? s.batches.reduce((sum, b) => sum + (parseFloat(b.remainingUSD) || 0), 0)
-              : (parseFloat(s.balance) || 0);
-
-            if (s.id === fromId) {
-              const newBal = parseFloat((curBal - (credits + tax)).toFixed(2));
-              return { ...s, balance: newBal };
-            }
-            if (s.id === toId) {
-              const newBal = parseFloat((curBal + credits).toFixed(2));
-              return { ...s, balance: newBal };
-            }
-            return s;
-          }));
-          showNotification('تم تحويل الرصيد بين الشرائح بنجاح', `$${credits} رصيد`);
-        }}
-        onAddExpense={(exp) => setExpenses([exp, ...expenses])}
+        onTransferBalance={handleTransferSimBalance}
+        onAddExpense={handleAddExpense}
         expenses={expenses}
         sources={sources}
         salesHistory={salesHistory}
-        debts={debts}
+        brandConfig={brandConfig}
       />
 
       <SalesModal

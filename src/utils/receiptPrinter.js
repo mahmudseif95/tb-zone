@@ -3,43 +3,44 @@
  * مربوط تلقائياً وديناميكياً بهوية المتجر من الإعدادات
  */
 export function openPrintableReceipt({
-    title = 'فاتورة مبيعات',
-    customerName = '',
-    customerPhone = '',
-    dateStr = '',
-    items = [],
-    totals = {},
-    notes = '',
-    accentColor = '#FF7A00',
-    shopName,
-    shopSubtitle,
-    shopPhone,
-    shopLogo
+  title = 'فاتورة مبيعات',
+  customerName = '',
+  customerPhone = '',
+  dateStr = '',
+  items = [],
+  totals = {},
+  notes = '',
+  accentColor = '#FF7A00',
+  shopName,
+  shopSubtitle,
+  shopPhone,
+  shopLogo
 }) {
-    // 1. قراءة بيانات الهوية ديناميكياً من الإعدادات المحفوظة
-    let brand = {};
-    try {
-        const raw = localStorage.getItem('tb_brand_config');
-        if (raw) brand = JSON.parse(raw);
-    } catch (err) {
-        brand = {};
-    }
+  // 1. قراءة بيانات الهوية ديناميكياً من الإعدادات المحفوظة
+  let brand = {};
+  try {
+    const raw = localStorage.getItem('tb_brand_config');
+    if (raw) brand = JSON.parse(raw);
+  } catch (err) {
+    brand = {};
+  }
 
-    // استخدام البيانات المدخلة في الإعدادات بدون أي قيم افتراضية ثابتة
-    const finalShopName = shopName || brand.name || '';
-    const finalSubtitle = shopSubtitle !== undefined ? shopSubtitle : (brand.subtitle || '');
-    const finalPhone = shopPhone !== undefined ? shopPhone : (brand.phone || '');
-    const finalLogo = shopLogo !== undefined ? shopLogo : (brand.logo || '');
+  // استخدام البيانات المدخلة في الإعدادات بدون أي قيم افتراضية ثابتة
+  const finalShopName = shopName || brand.name || '';
+  const finalSubtitle = shopSubtitle !== undefined ? shopSubtitle : (brand.subtitle || '');
+  const finalPhone = shopPhone !== undefined ? shopPhone : (brand.phone || '');
+  const finalLogo = shopLogo !== undefined ? shopLogo : (brand.logo || '');
+  const currentYear = new Date().getFullYear();
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-        alert('يرجى السماح بالنوافذ المنبثقة (Popups) من إعدادات المتصفح لعرض وطباعة الفاتورة!');
-        return;
-    }
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('يرجى السماح بالنوافذ المنبثقة (Popups) من إعدادات المتصفح لعرض وطباعة الفاتورة!');
+    return;
+  }
 
-    const itemsHtml = items.length === 0
-        ? `<tr><td colspan="3" style="padding: 14px; text-align: center; color: #64748b;">لا توجد عمليات مسجلة</td></tr>`
-        : items.map(item => `
+  const itemsHtml = items.length === 0
+    ? `<tr><td colspan="3" style="padding: 14px; text-align: center; color: #64748b;">لا توجد عمليات مسجلة</td></tr>`
+    : items.map(item => `
       <tr style="border-bottom: 1px solid #e2e8f0;">
         <td style="padding: 10px 8px; text-align: right; font-weight: 700; color: #1e293b;">${item.name}</td>
         <td style="padding: 10px 8px; text-align: center; color: #64748b; font-size: 11px; direction: ltr;">${item.sub || ''}</td>
@@ -47,7 +48,7 @@ export function openPrintableReceipt({
       </tr>
     `).join('');
 
-    printWindow.document.write(`
+  printWindow.document.write(`
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
@@ -193,14 +194,14 @@ export function openPrintableReceipt({
           ${notes ? `<p style="font-size: 11px; color: #64748b; margin-top: 12px; text-align: center;">${notes}</p>` : ''}
 
           <div class="footer">
-            <div>معتمد رسمياً من ${finalShopName || 'إدارة النظام'} • 2026</div>
+            <div>معتمد رسمياً من ${finalShopName || 'إدارة المتجر'}</div>
+            <div style="margin-top: 4px; direction: ltr;">By <strong>Zolfa Tech Est</strong> • © ${currentYear}</div>
           </div>
         </div>
 
       </div>
 
       <script>
-        // أمر الطباعة مع التركيز الزمني لضمان عمله على الآيفون والأندرويد
         function executePrint() {
           window.focus();
           setTimeout(function() {
@@ -208,7 +209,6 @@ export function openPrintableReceipt({
           }, 150);
         }
 
-        // نسخ نص الفاتورة للحافظة
         function copyInvoiceText() {
           var content = document.getElementById('invoice-printable-content').innerText;
           navigator.clipboard.writeText(content).then(function() {
@@ -222,7 +222,6 @@ export function openPrintableReceipt({
           });
         }
 
-        // مشاركة الفاتورة عبر واتساب
         function shareViaWhatsApp() {
           var titleStr = '${finalShopName ? finalShopName + "\\n" : ""}';
           var text = encodeURIComponent(titleStr + 'فاتورة / تقرير: ${title}\\nالعميل: ${customerName || "عام"}\\nالمجموع: ${totals.grandTotal || ""}\\nتاريخ: ${dateStr}');
@@ -232,5 +231,5 @@ export function openPrintableReceipt({
     </body>
     </html>
   `);
-    printWindow.document.close();
+  printWindow.document.close();
 }

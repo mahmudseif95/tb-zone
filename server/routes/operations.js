@@ -5,6 +5,106 @@ const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
 
+// تنسيق التاريخ ليبدأ بـ YYYY-MM-DD أولاً بدون إزاحة توقيت
+const formatDateOnly = (val) => {
+    if (!val) return null;
+    if (val instanceof Date) {
+        const y = val.getFullYear();
+        const m = String(val.getMonth() + 1).padStart(2, '0');
+        const d = String(val.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    return val.toString().split('T')[0];
+};
+
+// دالة موحدة لتسديد ديون الصناديق بنفس عملة الدين حصراً (طرح مباشر بدون سعر صرف عند تطابق العملة)
+async function settleBoxDebts(conn, { shopId, targetSimId, targetLineId, saleAmount, saleCurrency, rate, noteLabel }) {
+    const conditions = [];
+    const params = [shopId];
+
+    if (targetSimId) {
+        conditions.push('target_sim_id = ?');
+        params.push(targetSimId);
+    }
+    if (targetLineId) {
+        conditions.push('target_line_id = ?');
+        params.push(targetLineId);
+    }
+    if (conditions.length === 0) return { costInSaleCurr: 0, costInUSD: 0, hasBoxDebts: false };
+
+    const [boxDebts] = await conn.query(
+        `SELECT id, amount, currency, source_wallet_id FROM debts 
+     WHERE shop_id = ? AND category = 'boxes' AND (${conditions.join(' OR ')}) AND paid = 0 
+     ORDER BY created_at ASC`,
+        params
+    );
+
+    if (boxDebts.length === 0) return { costInSaleCurr: 0, costInUSD: 0, hasBoxDebts: false };
+
+    let remSaleInNativeCurr = parseFloat(saleAmount) || 0;
+    const isSaleLBP = saleCurrency === 'LBP';
+    let totalCostInSaleCurr = 0;
+
+    for (const d of boxDebts) {
+        if (remSaleInNativeCurr <= 0) break;
+        const isDebtLBP = d.currency === 'LBP';
+        const dRemNative = parseFloat(d.amount) || 0;
+        if (dRemNative <= 0) continue;
+
+        let payInDebtCurr = 0;
+        let usedFromSaleCurr = 0;
+
+        if (isDebtLBP === isSaleLBP) {
+            // نفس العملة (ليرة مع ليرة، أو دولار مع دولار): طرح مباشر 100% بدون أي سعر صرف
+            payInDebtCurr = Math.min(remSaleInNativeCurr, dRemNative);
+            usedFromSaleCurr = payInDebtCurr;
+        } else if (isDebtLBP && !isSaleLBP) {
+            // الدين بالليرة والزبون دفع بالدولار: نحول الدفعة لليرة لتعود للمحفظة ليرة
+            const remSaleInLBP = Math.round(remSaleInNativeCurr * rate);
+            payInDebtCurr = Math.min(remSaleInLBP, dRemNative);
+            usedFromSaleCurr = parseFloat((payInDebtCurr / rate).toFixed(4));
+        } else {
+            // الدين بالدولار والزبون دفع بالليرة: نحول الدفعة لدولار لتعود للمحفظة دولار
+            const remSaleInUSD = remSaleInNativeCurr / rate;
+            payInDebtCurr = parseFloat(Math.min(remSaleInUSD, dRemNative).toFixed(2));
+            usedFromSaleCurr = Math.round(payInDebtCurr * rate);
+        }
+
+        remSaleInNativeCurr = Math.max(0, parseFloat((remSaleInNativeCurr - usedFromSaleCurr).toFixed(4)));
+        totalCostInSaleCurr += usedFromSaleCurr;
+
+        const newDebtAmt = Math.max(0, parseFloat((dRemNative - payInDebtCurr).toFixed(2)));
+        const isPaid = newDebtAmt <= (isDebtLBP ? 100 : 0.01) ? 1 : 0;
+
+        await conn.query('UPDATE debts SET amount = ?, paid = ? WHERE id = ?', [newDebtAmt, isPaid, d.id]);
+
+        await conn.query(
+            `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [`dh_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, shopId, d.id, isPaid ? 'full_payment' : 'payment', payInDebtCurr, d.currency, newDebtAmt, noteLabel]
+        );
+
+        // إعادة المبلغ إلى المحفظة بنفس عملة الدين حصراً (ليرة -> balance_lbp | دولار -> balance_usd)
+        if (d.source_wallet_id && payInDebtCurr > 0) {
+            await conn.query(
+                'UPDATE sources SET balance_usd = balance_usd + ?, balance_lbp = balance_lbp + ? WHERE id = ? AND shop_id = ?',
+                [!isDebtLBP ? payInDebtCurr : 0, isDebtLBP ? payInDebtCurr : 0, d.source_wallet_id, shopId]
+            );
+            await conn.query(
+                `INSERT INTO source_ledger (id, shop_id, source_id, type, item_name, amount, currency, balance_after_usd, balance_after_lbp) 
+         VALUES (?, ?, ?, 'deposit', ?, ?, ?,
+           (SELECT balance_usd FROM sources WHERE id = ?),
+           (SELECT balance_lbp FROM sources WHERE id = ?)
+         )`,
+                [`tx_ret_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, shopId, d.source_wallet_id, `استرداد ${noteLabel}`, payInDebtCurr, d.currency, d.source_wallet_id, d.source_wallet_id]
+            );
+        }
+    }
+
+    const costInUSD = isSaleLBP ? parseFloat((totalCostInSaleCurr / rate).toFixed(2)) : parseFloat(totalCostInSaleCurr.toFixed(2));
+    return { costInSaleCurr: totalCostInSaleCurr, costInUSD, hasBoxDebts: true };
+}
+
 // ==========================================
 // 1. سعر الصرف
 // ==========================================
@@ -163,7 +263,7 @@ router.post('/wallet-transfer', async (req, res) => {
     }
 });
 
-// حركات المحافظ وسنة الأيام
+// حركات المحافظ وسنة الأيام (ليرة بليرة 100%)
 router.post('/wallet-tx', async (req, res) => {
     const shopId = req.shopId;
     const { walletId, tx } = req.body;
@@ -210,28 +310,48 @@ router.post('/wallet-tx', async (req, res) => {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL 7 DAY), ?)`,
                     [debtId, shopId, tx.customerType || 'customers', tx.customerName || 'عميل', tx.customerPhone || '', tx.remainingDebt, tx.remainingDebt, tx.currency || 'USD', tx.itemName || 'متبقي مبيع من المحفظة']
                 );
+                await conn.query(
+                    `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes)
+           VALUES (?, ?, ?, 'debt', ?, ?, ?, ?)`,
+                    [`dh_${Date.now()}`, shopId, debtId, tx.remainingDebt, tx.currency || 'USD', tx.remainingDebt, tx.itemName || 'متبقي مبيع']
+                );
             }
         }
 
-        await conn.query(
-            `INSERT INTO source_ledger (id, shop_id, source_id, type, item_name, amount, currency, balance_after_usd, balance_after_lbp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 
-         (SELECT balance_usd FROM sources WHERE id = ?), 
-         (SELECT balance_lbp FROM sources WHERE id = ?)
-       )`,
-            [`tx_${Date.now()}`, shopId, walletId, tx.type, tx.itemName || 'حركة محفظة', amountNum, tx.currency || 'USD', walletId, walletId]
-        );
+        if (!tx.isDaysYear) {
+            await conn.query(
+                `INSERT INTO source_ledger (id, shop_id, source_id, type, item_name, amount, currency, balance_after_usd, balance_after_lbp)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 
+           (SELECT balance_usd FROM sources WHERE id = ?), 
+           (SELECT balance_lbp FROM sources WHERE id = ?)
+         )`,
+                [`tx_${Date.now()}`, shopId, walletId, tx.type, tx.itemName || 'حركة محفظة', amountNum, tx.currency || 'USD', walletId, walletId]
+            );
+        }
 
+        // دورة سنة أيام Alfa: ليرة من المحفظة ➔ دين ليرة ➔ استرداد ليرة صافية للمحفظة
         if (tx.isDaysYear && tx.targetSimId) {
             const opRate = parseFloat(tx.daysFxRate) || 89500;
             const isDeductLBP = tx.walletDeductCurrency === 'LBP';
-            const deductVal = parseFloat(tx.walletDeduction) || (isDeductLBP ? Math.round(86.5 * opRate) : 86.5);
+            const deductVal = parseFloat(tx.walletDeduction) || 0;
+            const debtCurr = isDeductLBP ? 'LBP' : 'USD';
 
+            // 1. خصم تكلفة الكارت السني من المحفظة بنفس عملتها
             await conn.query(
                 `UPDATE sources SET balance_lbp = GREATEST(0, balance_lbp - ?), balance_usd = GREATEST(0, balance_usd - ?) WHERE id = ? AND shop_id = ?`,
                 [isDeductLBP ? deductVal : 0, !isDeductLBP ? deductVal : 0, walletId, shopId]
             );
 
+            await conn.query(
+                `INSERT INTO source_ledger (id, shop_id, source_id, type, item_name, amount, currency, balance_after_usd, balance_after_lbp)
+         VALUES (?, ?, ?, 'withdrawal', 'شراء سنة أيام Alfa', ?, ?, 
+           (SELECT balance_usd FROM sources WHERE id = ?), 
+           (SELECT balance_lbp FROM sources WHERE id = ?)
+         )`,
+                [`tx_dy_out_${Date.now()}`, shopId, walletId, deductVal, debtCurr, walletId, walletId]
+            );
+
+            // 2. إضافة رصيد المردود إلى الشريحة
             const returnCredit = parseFloat(tx.returnCreditUSD) || 73.5;
             const batchId = `batch_days_${Date.now()}`;
             await conn.query(
@@ -244,25 +364,88 @@ router.post('/wallet-tx', async (req, res) => {
                 [tx.targetSimId, tx.targetSimId, shopId]
             );
 
-            const debtCurr = isDeductLBP ? 'LBP' : 'USD';
-            const saleInDebtCurr = isDeductLBP
-                ? (tx.currency === 'LBP' ? amountNum : Math.round(amountNum * opRate))
-                : (tx.currency === 'LBP' ? parseFloat((amountNum / opRate).toFixed(2)) : amountNum);
+            // 3. حساب الدفعة الأولى المستردة من بيع الأيام بنفس العملة مباشرة
+            let saleInDebtCurr = 0;
+            if (isDeductLBP === isLBP) {
+                saleInDebtCurr = amountNum;
+            } else if (isDeductLBP && !isLBP) {
+                saleInDebtCurr = Math.round(amountNum * opRate);
+            } else {
+                saleInDebtCurr = parseFloat((amountNum / opRate).toFixed(2));
+            }
 
             const initialPay = Math.min(deductVal, saleInDebtCurr);
             const remDebt = parseFloat(Math.max(0, deductVal - initialPay).toFixed(2));
+            const isPaid = remDebt <= (isDeductLBP ? 100 : 0.01) ? 1 : 0;
 
+            // 4. تسجيل دين الصندوق بالعملة الأصلية (LBP أو USD)
             const debtId = `debt_box_${Date.now()}`;
             await conn.query(
                 `INSERT INTO debts (id, shop_id, category, name, amount, original_amount, currency, source_wallet_id, target_sim_id, paid, notes)
          VALUES (?, ?, 'boxes', (SELECT name FROM sources WHERE id = ?), ?, ?, ?, ?, ?, ?, 'دين دورة سنة أيام')`,
-                [debtId, shopId, walletId, remDebt, deductVal, debtCurr, walletId, tx.targetSimId, remDebt <= (isDeductLBP ? 100 : 0.01) ? 1 : 0]
+                [debtId, shopId, walletId, remDebt, deductVal, debtCurr, walletId, tx.targetSimId, isPaid]
             );
 
+            await conn.query(
+                `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes)
+         VALUES (?, ?, ?, 'debt', ?, ?, ?, 'أصل تكلفة سنة أيام Alfa')`,
+                [`dh_dy_init_${Date.now()}`, shopId, debtId, deductVal, debtCurr, deductVal]
+            );
+
+            // 5. إعادة ثمن الأيام المسددة فوراً إلى نفس العملة في المحفظة
             if (initialPay > 0) {
                 await conn.query(
                     `UPDATE sources SET balance_usd = balance_usd + ?, balance_lbp = balance_lbp + ? WHERE id = ? AND shop_id = ?`,
                     [!isDeductLBP ? initialPay : 0, isDeductLBP ? initialPay : 0, walletId, shopId]
+                );
+
+                await conn.query(
+                    `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes)
+           VALUES (?, ?, ?, 'payment', ?, ?, ?, 'سداد من مبيع الأيام للزبون')`,
+                    [`dh_dy_pay_${Date.now()}`, shopId, debtId, initialPay, debtCurr, remDebt]
+                );
+
+                await conn.query(
+                    `INSERT INTO source_ledger (id, shop_id, source_id, type, item_name, amount, currency, balance_after_usd, balance_after_lbp)
+           VALUES (?, ?, ?, 'deposit', 'استرداد مبيع أيام Alfa', ?, ?, 
+             (SELECT balance_usd FROM sources WHERE id = ?), 
+             (SELECT balance_lbp FROM sources WHERE id = ?)
+           )`,
+                    [`tx_dy_in_${Date.now()}`, shopId, walletId, initialPay, debtCurr, walletId, walletId]
+                );
+            }
+
+            // 6. تسجيل عملية بيع الأيام في سجل المبيعات العام
+            const profitSurplusInDebtCurr = Math.max(0, saleInDebtCurr - deductVal);
+            const profitUSDVal = isDeductLBP
+                ? parseFloat((profitSurplusInDebtCurr / opRate).toFixed(2))
+                : parseFloat(profitSurplusInDebtCurr.toFixed(2));
+
+            await conn.query(
+                `INSERT INTO sales_history (id, shop_id, type, operator, title, item_name, selling_price, currency, cost_usd, profit_usd, customer_name, customer_phone, is_debt, payment_type, notes)
+         VALUES (?, ?, 'wallet_sale', 'alfa', 'بيع سنة أيام Alfa', 'بيع سنة أيام Alfa', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    `sale_dy_${Date.now()}`, shopId, amountNum, tx.currency || 'LBP',
+                    isDeductLBP ? parseFloat((initialPay / opRate).toFixed(2)) : initialPay,
+                    profitUSDVal,
+                    tx.customerName || 'عام', tx.customerPhone || '',
+                    tx.remainingDebt > 0 ? 1 : 0, tx.paymentType || 'cash',
+                    `استرداد للمحفظة: ${initialPay.toLocaleString()} ${debtCurr}`
+                ]
+            );
+
+            // 7. إذا بقي دين على الزبون المشتري للأيام
+            if (tx.remainingDebt && parseFloat(tx.remainingDebt) > 0) {
+                const custDebtId = `debt_cust_${Date.now()}`;
+                await conn.query(
+                    `INSERT INTO debts (id, shop_id, category, name, phone, amount, original_amount, currency, due_date, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'متبقي بيع سنة أيام Alfa')`,
+                    [custDebtId, shopId, tx.customerType || 'customers', tx.customerName || 'عميل', tx.customerPhone || '', tx.remainingDebt, tx.remainingDebt, tx.currency || 'LBP']
+                );
+                await conn.query(
+                    `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes)
+           VALUES (?, ?, ?, 'debt', ?, ?, ?, 'متبقي بيع سنة أيام Alfa')`,
+                    [`dh_cust_${Date.now()}`, shopId, custDebtId, tx.remainingDebt, tx.currency || 'LBP', tx.remainingDebt]
                 );
             }
         }
@@ -445,7 +628,7 @@ router.post('/sim-transfer', async (req, res) => {
 });
 
 // ==========================================
-// 4. الخطوط المسكرة (Locked Lines)
+// 4. الخطوط المسكرة والمفتوحة (Locked & Open Lines)
 // ==========================================
 router.post('/line', async (req, res) => {
     const shopId = req.shopId;
@@ -454,21 +637,30 @@ router.post('/line', async (req, res) => {
 
     try {
         await pool.query(
-            `INSERT INTO locked_lines (id, shop_id, slot_number, phone_number, balance_usd, has_service, service_active, service_start_date, service_days, user1, user2, user3)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO locked_lines (id, shop_id, line_type, slot_number, phone_number, validity_days, validity_start_date, balance_usd, has_service, service_active, service_start_date, service_days, admin_name, admin_phone, admin_address, admin_gb, admin_price, user1, user2, user3, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 lineId,
                 shopId,
+                l.type || 'locked',
                 l.slotNumber || 1,
                 l.phoneNumber || l.number || '',
+                parseInt(l.validityDays ?? 30, 10),
+                formatDateOnly(l.validityStartDate) || formatDateOnly(new Date()),
                 parseFloat(l.balanceUSD || l.balance || 0),
                 l.hasService ? 1 : 0,
-                l.serviceActive ? 1 : 0,
-                l.serviceStartDate || null,
-                l.serviceDays || 30,
+                (l.serviceActive ?? l.hasService) ? 1 : 0,
+                l.hasService ? formatDateOnly(l.serviceStartDate) : null,
+                30,
+                l.adminName || '',
+                l.adminPhone || '',
+                l.adminAddress || '',
+                l.adminGB || '22',
+                l.adminPrice || '',
                 l.user1 || '',
                 l.user2 || '',
-                l.user3 || ''
+                l.user3 || '',
+                l.notes || ''
             ]
         );
         res.status(201).json({ success: true, id: lineId });
@@ -486,28 +678,47 @@ router.put('/line/:id', async (req, res) => {
     try {
         await pool.query(
             `UPDATE locked_lines SET
+       line_type = COALESCE(?, line_type),
        slot_number = COALESCE(?, slot_number),
        phone_number = COALESCE(?, phone_number),
+       validity_days = COALESCE(?, validity_days),
+       validity_start_date = COALESCE(?, validity_start_date),
        balance_usd = COALESCE(?, balance_usd),
        has_service = COALESCE(?, has_service),
        service_active = COALESCE(?, service_active),
-       service_start_date = COALESCE(?, service_start_date),
+       service_start_date = CASE WHEN ? = 0 THEN NULL ELSE COALESCE(?, service_start_date) END,
        service_days = COALESCE(?, service_days),
+       admin_name = COALESCE(?, admin_name),
+       admin_phone = COALESCE(?, admin_phone),
+       admin_address = COALESCE(?, admin_address),
+       admin_gb = COALESCE(?, admin_gb),
+       admin_price = COALESCE(?, admin_price),
        user1 = COALESCE(?, user1),
        user2 = COALESCE(?, user2),
-       user3 = COALESCE(?, user3)
+       user3 = COALESCE(?, user3),
+       notes = COALESCE(?, notes)
        WHERE id = ? AND shop_id = ?`,
             [
+                l.type,
                 l.slotNumber,
                 l.phoneNumber || l.number,
+                l.validityDays !== undefined ? parseInt(l.validityDays, 10) : undefined,
+                l.validityStartDate ? formatDateOnly(l.validityStartDate) : undefined,
                 l.balanceUSD !== undefined ? parseFloat(l.balanceUSD) : undefined,
                 l.hasService !== undefined ? (l.hasService ? 1 : 0) : undefined,
-                l.serviceActive !== undefined ? (l.serviceActive ? 1 : 0) : undefined,
-                l.serviceStartDate,
+                l.hasService !== undefined ? (l.hasService ? 1 : 0) : undefined,
+                l.hasService === false ? 0 : 1,
+                l.serviceStartDate ? formatDateOnly(l.serviceStartDate) : null,
                 l.serviceDays,
+                l.adminName,
+                l.adminPhone,
+                l.adminAddress,
+                l.adminGB,
+                l.adminPrice,
                 l.user1,
                 l.user2,
                 l.user3,
+                l.notes,
                 lineId,
                 shopId
             ]
@@ -542,7 +753,9 @@ router.post('/sale', async (req, res) => {
 
         const saleId = `sale_${Date.now()}`;
         const rate = parseFloat(data.exchangeRate) || 89500;
-        const saleUSD = data.currency === 'LBP' ? (parseFloat(data.sellingPrice) / rate) : parseFloat(data.sellingPrice);
+        const rawSale = parseFloat(data.sellingPrice) || 0;
+        const saleCurrency = data.currency || 'LBP';
+        const saleUSD = saleCurrency === 'LBP' ? (rawSale / rate) : rawSale;
         let costUSD = parseFloat(data.costUSD || 0);
         let profitUSD = data.profitUSD !== undefined ? parseFloat(data.profitUSD) : Math.max(0, saleUSD - costUSD);
 
@@ -574,58 +787,21 @@ router.post('/sale', async (req, res) => {
             );
         }
 
-        // سداد ديون الصناديق المرتبطة بالشريحة مع الحفاظ على عملة كل دين حصراً
-        const [boxDebts] = await conn.query(
-            `SELECT id, amount, currency, source_wallet_id FROM debts 
-       WHERE shop_id = ? AND category = 'boxes' AND target_sim_id = ? AND paid = 0 
-       ORDER BY created_at ASC`,
-            [shopId, data.simId || '']
-        );
+        // تسديد ديون الصندوق بنفس عملة الدين مباشرة (ليرة بليرة بدون تحويل)
+        const debtSettlement = await settleBoxDebts(conn, {
+            shopId,
+            targetSimId: data.simId || null,
+            targetLineId: null,
+            saleAmount: rawSale,
+            saleCurrency,
+            rate,
+            noteLabel: `من مبيع (${data.itemName})`
+        });
 
-        let remSaleUSD = saleUSD;
-        let costAssignedUSD = 0;
-
-        for (const d of boxDebts) {
-            if (remSaleUSD <= 0) break;
-            const isDebtLBP = d.currency === 'LBP';
-            const dRemNative = parseFloat(d.amount);
-            const dRemUSD = isDebtLBP ? (dRemNative / rate) : dRemNative;
-
-            const payUSD = Math.min(remSaleUSD, dRemUSD);
-            const payNative = isDebtLBP ? Math.round(payUSD * rate) : parseFloat(payUSD.toFixed(2));
-            remSaleUSD -= payUSD;
-            costAssignedUSD += payUSD;
-
-            const newDebtAmt = Math.max(0, parseFloat((dRemNative - payNative).toFixed(2)));
-            const isPaid = newDebtAmt <= (isDebtLBP ? 100 : 0.01) ? 1 : 0;
-
-            await conn.query('UPDATE debts SET amount = ?, paid = ? WHERE id = ?', [newDebtAmt, isPaid, d.id]);
-
-            await conn.query(
-                `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes) 
-         VALUES (?, ?, ?, 'payment', ?, ?, ?, ?)`,
-                [`dh_${Date.now()}_${Math.random()}`, shopId, d.id, payNative, d.currency, newDebtAmt, `سداد من مبيع (${data.itemName})`]
-            );
-
-            if (d.source_wallet_id) {
-                await conn.query(
-                    'UPDATE sources SET balance_usd = balance_usd + ?, balance_lbp = balance_lbp + ? WHERE id = ? AND shop_id = ?',
-                    [!isDebtLBP ? payNative : 0, isDebtLBP ? payNative : 0, d.source_wallet_id, shopId]
-                );
-                await conn.query(
-                    `INSERT INTO source_ledger (id, shop_id, source_id, type, item_name, amount, currency, balance_after_usd, balance_after_lbp) 
-           VALUES (?, ?, ?, 'deposit', ?, ?, ?,
-             (SELECT balance_usd FROM sources WHERE id = ?),
-             (SELECT balance_lbp FROM sources WHERE id = ?)
-           )`,
-                    [`tx_ret_${Date.now()}`, shopId, d.source_wallet_id, `استرداد دين من مبيع (${data.itemName})`, payNative, d.currency, d.source_wallet_id, d.source_wallet_id]
-                );
-            }
-        }
-
-        if (boxDebts.length > 0) {
-            costUSD = costAssignedUSD;
-            profitUSD = Math.max(0, parseFloat((saleUSD - costAssignedUSD).toFixed(2)));
+        if (debtSettlement.hasBoxDebts) {
+            costUSD = debtSettlement.costInUSD;
+            const profitInSaleCurr = Math.max(0, rawSale - debtSettlement.costInSaleCurr);
+            profitUSD = saleCurrency === 'LBP' ? parseFloat((profitInSaleCurr / rate).toFixed(2)) : parseFloat(profitInSaleCurr.toFixed(2));
         }
 
         if (data.remainingDebt && parseFloat(data.remainingDebt) > 0) {
@@ -633,12 +809,12 @@ router.post('/sale', async (req, res) => {
             await conn.query(
                 `INSERT INTO debts (id, shop_id, category, name, phone, amount, original_amount, currency, due_date, notes)
          VALUES (?, ?, 'customers', ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL 7 DAY), ?)`,
-                [debtId, shopId, data.customerName, data.customerPhone || '', data.remainingDebt, data.remainingDebt, data.currency || 'LBP', data.itemName]
+                [debtId, shopId, data.customerName, data.customerPhone || '', data.remainingDebt, data.remainingDebt, saleCurrency, data.itemName]
             );
             await conn.query(
                 `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes)
          VALUES (?, ?, ?, 'debt', ?, ?, ?, ?)`,
-                [`dh_${Date.now()}`, shopId, debtId, data.remainingDebt, data.currency || 'LBP', data.remainingDebt, data.itemName]
+                [`dh_${Date.now()}`, shopId, debtId, data.remainingDebt, saleCurrency, data.remainingDebt, data.itemName]
             );
         }
 
@@ -647,7 +823,7 @@ router.post('/sale', async (req, res) => {
        VALUES (?, ?, 'recharge_sale', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 saleId, shopId, data.operator, data.title || data.itemName, data.itemName,
-                data.sellingPrice, data.currency || 'LBP', costUSD, profitUSD,
+                rawSale, saleCurrency, costUSD, profitUSD,
                 data.customerName || 'عام', data.customerPhone || '', data.remainingDebt > 0 ? 1 : 0,
                 data.paymentType || 'cash', data.notes || ''
             ]
@@ -675,12 +851,12 @@ router.post('/sale', async (req, res) => {
 });
 
 // ==========================================
-// 6. Alfa Gift (مشتري واحد) + U-Share (توزيع حتى 3 مستفيدين)
+// 6. Alfa Gift (مشتري واحد) + U-Share (توزيع حتى 3 مستفيدين) + حصص الخطوط
 // ==========================================
 router.post('/alfa-gift-sale', async (req, res) => {
     const shopId = req.shopId;
     const {
-        mode = 'ushare', // 'direct_gift' (مشتري واحد بدون مستفيدين) | 'ushare' (توزيع حتى 3 مستفيدين)
+        mode = 'ushare',
         simId,
         selectedBatchId,
         deductUSD,
@@ -696,7 +872,7 @@ router.post('/alfa-gift-sale', async (req, res) => {
     try {
         await conn.beginTransaction();
 
-        // أ) خصم الرصيد من الشريحة أو الخط المسكر
+        // أ) خصم الرصيد من الشريحة أو الخط
         if (simId) {
             if (selectedBatchId) {
                 await conn.query(
@@ -737,7 +913,7 @@ router.post('/alfa-gift-sale', async (req, res) => {
                         lockedLineId, shopId
                     ]
                 );
-            } else {
+            } else if (parseFloat(deductUSD) > 0) {
                 await conn.query(
                     `UPDATE locked_lines SET balance_usd = GREATEST(0, balance_usd - ?) WHERE id = ? AND shop_id = ?`,
                     [deductUSD, lockedLineId, shopId]
@@ -745,57 +921,60 @@ router.post('/alfa-gift-sale', async (req, res) => {
             }
         }
 
-        // ب) تسجيل المبيعات والديون واسترداد الصناديق بنفس عملة الدين
+        // ب) تسجيل المبيعات والديون واسترداد الصناديق بنفس عملتها مباشرة (مع دعم الدفع الجزئي)
         for (let i = 0; i < recipients.length; i++) {
             const rec = recipients[i];
             const saleVal = parseFloat(rec.price) || 0;
-            const saleUSD = rec.currency === 'LBP' ? (saleVal / rate) : saleVal;
+            const recCurrency = rec.currency || 'USD';
+            const payType = rec.paymentType || (rec.isDebt ? 'debt' : 'cash');
 
-            const [matchingDebts] = await conn.query(
-                `SELECT id, amount, currency, source_wallet_id FROM debts 
-         WHERE shop_id = ? AND category = 'boxes' 
-         AND (target_line_id = ? OR target_sim_id = ?) AND paid = 0 
-         ORDER BY created_at ASC`,
-                [shopId, lockedLineId || '', simId || '']
-            );
+            const remDebtVal = rec.remainingDebt !== undefined
+                ? parseFloat(rec.remainingDebt)
+                : (payType === 'debt' ? saleVal : 0);
 
-            let remSaleUSD = saleUSD;
-            let costAssignedUSD = 0;
+            const paidNowVal = rec.paidAmount !== undefined
+                ? parseFloat(rec.paidAmount)
+                : Math.max(0, saleVal - remDebtVal);
 
-            for (const d of matchingDebts) {
-                if (remSaleUSD <= 0) break;
-                const isDebtLBP = d.currency === 'LBP';
-                const dRemNative = parseFloat(d.amount);
-                const dRemUSD = isDebtLBP ? (dRemNative / rate) : dRemNative;
+            const saleUSD = recCurrency === 'LBP' ? (saleVal / rate) : saleVal;
 
-                const payUSD = Math.min(remSaleUSD, dRemUSD);
-                const payNative = isDebtLBP ? Math.round(payUSD * rate) : parseFloat(payUSD.toFixed(2));
-                remSaleUSD -= payUSD;
-                costAssignedUSD += payUSD;
+            const labelTitle = rec.itemName || (mode === 'direct_gift'
+                ? `Alfa Gift ${totalGB}GB`
+                : `U-Share (${rec.gb} GB)`);
 
-                const newDebtAmt = Math.max(0, parseFloat((dRemNative - payNative).toFixed(2)));
-                await conn.query('UPDATE debts SET amount = ?, paid = ? WHERE id = ?', [newDebtAmt, newDebtAmt <= (isDebtLBP ? 100 : 0.01) ? 1 : 0, d.id]);
+            const debtSettlement = await settleBoxDebts(conn, {
+                shopId,
+                targetSimId: simId || null,
+                targetLineId: lockedLineId || null,
+                saleAmount: paidNowVal,
+                saleCurrency: recCurrency,
+                rate,
+                noteLabel: `من مبيع ${labelTitle}`
+            });
 
-                if (d.source_wallet_id) {
-                    await conn.query(
-                        'UPDATE sources SET balance_usd = balance_usd + ?, balance_lbp = balance_lbp + ? WHERE id = ? AND shop_id = ?',
-                        [!isDebtLBP ? payNative : 0, isDebtLBP ? payNative : 0, d.source_wallet_id, shopId]
-                    );
-                }
+            const finalCostUSD = debtSettlement.hasBoxDebts
+                ? debtSettlement.costInUSD
+                : (mode === 'direct_gift' ? (parseFloat(deductUSD) || 0) : 0);
+
+            let netProfitUSD = 0;
+            if (debtSettlement.hasBoxDebts) {
+                const profitInRecCurr = Math.max(0, paidNowVal - debtSettlement.costInSaleCurr);
+                netProfitUSD = recCurrency === 'LBP' ? parseFloat((profitInRecCurr / rate).toFixed(2)) : parseFloat(profitInRecCurr.toFixed(2));
+            } else {
+                netProfitUSD = Math.max(0, parseFloat((saleUSD - finalCostUSD).toFixed(2)));
             }
 
-            const finalCostUSD = costAssignedUSD > 0 ? costAssignedUSD : (mode === 'direct_gift' ? parseFloat(deductUSD) : 0);
-            const netProfit = Math.max(0, parseFloat((saleUSD - finalCostUSD).toFixed(2)));
-            const labelTitle = mode === 'direct_gift'
-                ? `Alfa Gift ${totalGB}GB`
-                : `U-Share (${rec.gb} GB)`;
-
-            if (rec.isDebt) {
+            if (remDebtVal > 0) {
                 const debtId = `debt_cust_${Date.now()}_${i}`;
                 await conn.query(
                     `INSERT INTO debts (id, shop_id, category, name, phone, amount, original_amount, currency, due_date, notes)
-           VALUES (?, ?, 'customers', ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL 7 DAY), ?)`,
-                    [debtId, shopId, rec.name.trim(), rec.phone || '', saleVal, saleVal, rec.currency || 'USD', labelTitle]
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL 7 DAY), ?)`,
+                    [debtId, shopId, rec.customerType || 'customers', rec.name.trim(), rec.phone || '', remDebtVal, remDebtVal, recCurrency, labelTitle]
+                );
+                await conn.query(
+                    `INSERT INTO debt_history (id, shop_id, debt_id, type, amount, currency, remaining_after, notes)
+           VALUES (?, ?, ?, 'debt', ?, ?, ?, ?)`,
+                    [`dh_gift_${Date.now()}_${i}`, shopId, debtId, remDebtVal, recCurrency, remDebtVal, labelTitle]
                 );
             }
 
@@ -809,13 +988,13 @@ router.post('/alfa-gift-sale', async (req, res) => {
                     labelTitle,
                     labelTitle,
                     saleVal,
-                    rec.currency || 'USD',
+                    recCurrency,
                     finalCostUSD,
-                    netProfit,
+                    netProfitUSD,
                     rec.name.trim() || 'عام',
                     rec.phone || '',
-                    rec.isDebt ? 1 : 0,
-                    rec.isDebt ? 'debt' : 'cash'
+                    remDebtVal > 0 ? 1 : 0,
+                    payType
                 ]
             );
 
@@ -873,7 +1052,6 @@ router.post('/debt', async (req, res) => {
             [`dh_${Date.now()}`, shopId, debtId, numAmt, curr, numAmt, notes || 'تسجيل ذمة جديدة']
         );
 
-        // إذا كان دين صندوق: يخصم من نفس عملة الدين حصراً (ليرة من ليرة، دولار من دولار)
         if (category === 'boxes' && sourceWalletId) {
             await conn.query(
                 `UPDATE sources SET 
@@ -934,7 +1112,6 @@ router.delete('/debt/:id', async (req, res) => {
     }
 });
 
-// سداد الدين: يردّ المبلغ إلى نفس العملة (LBP -> balance_lbp | USD -> balance_usd) حصراً
 router.post('/debt-payment', async (req, res) => {
     const shopId = req.shopId;
     const { debtId, amount, notes } = req.body;

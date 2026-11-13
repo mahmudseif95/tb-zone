@@ -3,22 +3,31 @@ const router = express.Router();
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
 
-// حماية كامل المسارات بواسطة التوكن وعزل المحل
 router.use(authMiddleware);
+
+// تنسيق التاريخ ليبدأ بـ YYYY-MM-DD أولاً بدون إزاحة توقيت
+const formatDateOnly = (val) => {
+    if (!val) return '';
+    if (val instanceof Date) {
+        const y = val.getFullYear();
+        const m = String(val.getMonth() + 1).padStart(2, '0');
+        const d = String(val.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    return val.toString().split('T')[0];
+};
 
 // 1. جلب كافة بيانات المحل المعتمدة دفعة واحدة (Bootstrap)
 router.get('/bootstrap', async (req, res) => {
     const shopId = req.shopId;
 
     try {
-        // إعدادات وبيانات المحل
         const [shopRows] = await pool.query(
             'SELECT id, name, subtitle, phone, logo, exchange_rate FROM shops WHERE id = ?',
             [shopId]
         );
         const shop = shopRows[0] || {};
 
-        // المحافظ والصناديق
         const [sourcesRows] = await pool.query(
             'SELECT * FROM sources WHERE shop_id = ? ORDER BY created_at ASC',
             [shopId]
@@ -48,7 +57,6 @@ router.get('/bootstrap', async (req, res) => {
                 }))
         }));
 
-        // شرائح الرصيد ودفعاتها
         const [simsRows] = await pool.query(
             'SELECT * FROM sims WHERE shop_id = ? ORDER BY created_at ASC',
             [shopId]
@@ -78,28 +86,35 @@ router.get('/bootstrap', async (req, res) => {
                 }))
         }));
 
-        // الخطوط المسكرة
         const [linesRows] = await pool.query(
             'SELECT * FROM locked_lines WHERE shop_id = ? ORDER BY slot_number ASC',
             [shopId]
         );
         const lines = linesRows.map(l => ({
             id: l.id,
+            type: l.line_type || 'locked',
             slotNumber: l.slot_number,
             phoneNumber: l.phone_number,
             number: l.phone_number,
+            validityDays: l.validity_days ?? 30,
+            validityStartDate: formatDateOnly(l.validity_start_date),
             balanceUSD: parseFloat(l.balance_usd).toString(),
             balance: parseFloat(l.balance_usd),
             hasService: Boolean(l.has_service),
             serviceActive: Boolean(l.service_active),
-            serviceStartDate: l.service_start_date,
-            serviceDays: l.service_days,
+            serviceStartDate: formatDateOnly(l.service_start_date),
+            serviceDays: l.service_days || 30,
+            adminName: l.admin_name || '',
+            adminPhone: l.admin_phone || '',
+            adminAddress: l.admin_address || '',
+            adminGB: l.admin_gb || '22',
+            adminPrice: l.admin_price || '',
             user1: l.user1 || '',
             user2: l.user2 || '',
-            user3: l.user3 || ''
+            user3: l.user3 || '',
+            notes: l.notes || ''
         }));
 
-        // الديون وكشوفات السداد
         const [debtsRows] = await pool.query(
             'SELECT * FROM debts WHERE shop_id = ? ORDER BY created_at DESC',
             [shopId]
@@ -117,7 +132,7 @@ router.get('/bootstrap', async (req, res) => {
             amount: parseFloat(d.amount),
             originalAmount: parseFloat(d.original_amount),
             currency: d.currency,
-            dueDate: d.due_date,
+            dueDate: formatDateOnly(d.due_date),
             paid: Boolean(d.paid),
             sourceWalletId: d.source_wallet_id,
             targetSimId: d.target_sim_id,
@@ -132,12 +147,12 @@ router.get('/bootstrap', async (req, res) => {
                     type: h.type,
                     amount: parseFloat(h.amount),
                     currency: h.currency,
+                    remainingAfter: h.remaining_after !== null && h.remaining_after !== undefined ? parseFloat(h.remaining_after) : undefined,
                     notes: h.notes,
                     date: h.date
                 }))
         }));
 
-        // الزبائن
         const [customersRows] = await pool.query(
             'SELECT * FROM customers WHERE shop_id = ? ORDER BY name ASC',
             [shopId]
@@ -149,7 +164,6 @@ router.get('/bootstrap', async (req, res) => {
             address: c.address
         }));
 
-        // سجل المبيعات
         const [salesRows] = await pool.query(
             'SELECT * FROM sales_history WHERE shop_id = ? ORDER BY date DESC LIMIT 200',
             [shopId]
@@ -173,7 +187,6 @@ router.get('/bootstrap', async (req, res) => {
             date: s.date
         }));
 
-        // المصاريف
         const [expensesRows] = await pool.query(
             'SELECT * FROM expenses WHERE shop_id = ? ORDER BY date DESC LIMIT 100',
             [shopId]
@@ -190,9 +203,9 @@ router.get('/bootstrap', async (req, res) => {
 
         res.json({
             brandConfig: {
-                name: shop.name || 'ZOLFA TECH',
-                subtitle: shop.subtitle || 'OS TELECOM',
-                phone: shop.phone || '78877026',
+                name: shop.name || '',
+                subtitle: shop.subtitle || '',
+                phone: shop.phone || '',
                 logo: shop.logo || ''
             },
             exchangeRate: parseFloat(shop.exchange_rate) || 89500,
@@ -204,7 +217,6 @@ router.get('/bootstrap', async (req, res) => {
             salesHistory,
             expenses
         });
-
     } catch (err) {
         console.error('Bootstrap data error:', err);
         res.status(500).json({ message: 'فشل جلب بيانات المحل من السيرفر' });
@@ -234,23 +246,22 @@ router.put('/brand', async (req, res) => {
     }
 });
 
-// 3. ترحيل ونقل بيانات LocalStorage كاملة إلى MySQL (Import / Seed)
+// 3. ترحيل ونقل بيانات LocalStorage كاملة إلى MySQL
 router.post('/import-local', async (req, res) => {
     const shopId = req.shopId;
-    const { brandConfig, exchangeRate, sources, sims, lines, debts, customers, expenses, salesHistory } = req.body;
+    const { brandConfig, exchangeRate, sources, sims, lines, debts, customers, salesHistory } = req.body;
 
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
 
-        // تحديث المحل وسعر الصرف
         if (brandConfig || exchangeRate) {
             await connection.query(
                 'UPDATE shops SET name = ?, subtitle = ?, phone = ?, logo = ?, exchange_rate = ? WHERE id = ?',
                 [
-                    brandConfig?.name || 'ZOLFA TECH',
-                    brandConfig?.subtitle || 'OS TELECOM',
-                    brandConfig?.phone || '78877026',
+                    brandConfig?.name || '',
+                    brandConfig?.subtitle || '',
+                    brandConfig?.phone || '',
                     brandConfig?.logo || '',
                     exchangeRate || 89500,
                     shopId
@@ -258,7 +269,6 @@ router.post('/import-local', async (req, res) => {
             );
         }
 
-        // استيراد المحافظ
         if (Array.isArray(sources)) {
             for (const s of sources) {
                 await connection.query(
@@ -270,7 +280,6 @@ router.post('/import-local', async (req, res) => {
             }
         }
 
-        // استيراد الشرائح والدفعات
         if (Array.isArray(sims)) {
             for (const sim of sims) {
                 await connection.query(
@@ -296,23 +305,24 @@ router.post('/import-local', async (req, res) => {
             }
         }
 
-        // استيراد الخطوط المسكرة
         if (Array.isArray(lines)) {
             for (const l of lines) {
                 await connection.query(
-                    `INSERT INTO locked_lines (id, shop_id, slot_number, phone_number, balance_usd, has_service, service_active, service_start_date, service_days, user1, user2, user3)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `INSERT INTO locked_lines (id, shop_id, line_type, slot_number, phone_number, validity_days, validity_start_date, balance_usd, has_service, service_active, service_start_date, service_days, admin_name, admin_phone, admin_address, admin_gb, admin_price, user1, user2, user3, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE balance_usd = VALUES(balance_usd), user1 = VALUES(user1), user2 = VALUES(user2), user3 = VALUES(user3)`,
                     [
-                        l.id, shopId, l.slotNumber || 1, l.phoneNumber || l.number || '',
-                        parseFloat(l.balanceUSD || l.balance || 0), l.hasService ? 1 : 0, l.serviceActive ? 1 : 0,
-                        l.serviceStartDate || null, l.serviceDays || 30, l.user1 || '', l.user2 || '', l.user3 || ''
+                        l.id, shopId, l.type || 'locked', l.slotNumber || 1, l.phoneNumber || l.number || '',
+                        l.validityDays || 30, formatDateOnly(l.validityStartDate) || null,
+                        parseFloat(l.balanceUSD || l.balance || 0), l.hasService ? 1 : 0, (l.serviceActive ?? l.hasService) ? 1 : 0,
+                        formatDateOnly(l.serviceStartDate) || null, l.serviceDays || 30,
+                        l.adminName || '', l.adminPhone || '', l.adminAddress || '', l.adminGB || '22', l.adminPrice || '',
+                        l.user1 || '', l.user2 || '', l.user3 || '', l.notes || ''
                     ]
                 );
             }
         }
 
-        // استيراد الديون
         if (Array.isArray(debts)) {
             for (const d of debts) {
                 await connection.query(
@@ -322,7 +332,7 @@ router.post('/import-local', async (req, res) => {
                     [
                         d.id, shopId, d.category || 'customers', d.name, d.phone || '',
                         d.amount || 0, d.originalAmount || d.amount || 0, d.currency || 'USD',
-                        d.dueDate || null, d.paid ? 1 : 0, d.sourceWalletId || null,
+                        formatDateOnly(d.dueDate) || null, d.paid ? 1 : 0, d.sourceWalletId || null,
                         d.targetSimId || null, d.targetLineId || null, d.cycleId || null, d.notes || ''
                     ]
                 );
@@ -340,7 +350,6 @@ router.post('/import-local', async (req, res) => {
             }
         }
 
-        // استيراد الزبائن
         if (Array.isArray(customers)) {
             for (const c of customers) {
                 await connection.query(
@@ -352,7 +361,6 @@ router.post('/import-local', async (req, res) => {
             }
         }
 
-        // استيراد العمليات السابقة
         if (Array.isArray(salesHistory)) {
             for (const s of salesHistory) {
                 await connection.query(

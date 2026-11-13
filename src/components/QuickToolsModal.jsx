@@ -7,9 +7,7 @@ import {
   Receipt,
   Lock,
   Printer,
-  MessageCircle,
-  CheckCircle2,
-  AlertCircle
+  MessageCircle
 } from 'lucide-react';
 
 export default function QuickToolsModal({
@@ -22,10 +20,10 @@ export default function QuickToolsModal({
   expenses = [],
   sources = [],
   salesHistory = [],
-  brandConfig,
-  onResetTodaySales
+  brandConfig
 }) {
   const [activeTab, setActiveTab] = useState('transfer'); // 'transfer' | 'expense' | 'closeout'
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [fromSimId, setFromSimId] = useState('');
   const [toSimId, setToSimId] = useState('');
@@ -36,8 +34,8 @@ export default function QuickToolsModal({
   const [expenseTitle, setExpenseTitle] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseCurrency, setExpenseCurrency] = useState('LBP');
-
-  const [showCloseoutReport, setShowCloseoutReport] = useState(false);
+  const [expenseWalletId, setExpenseWalletId] = useState('');
+  const [expenseNotes, setExpenseNotes] = useState('');
 
   if (!isOpen) return null;
 
@@ -51,8 +49,9 @@ export default function QuickToolsModal({
     return parseFloat(sim.balance) || 0;
   };
 
-  const handleTransfer = (e) => {
+  const handleTransfer = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setTransferError('');
     setTransferSuccess('');
 
@@ -81,35 +80,67 @@ export default function QuickToolsModal({
       return;
     }
 
-    if (onTransferBalance) {
-      onTransferBalance(fromSimId, toSimId, credits);
+    try {
+      setIsSubmitting(true);
+      if (onTransferBalance) {
+        await onTransferBalance(fromSimId, toSimId, credits);
+      }
+      setTransferSuccess(`تمت المناقلة بنجاح! تم تحويل $${credits} وخصم $${tax} ضريبة.`);
+      setTransferCredits('');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setTransferSuccess(`تمت المناقلة بنجاح! تم تحويل $${credits} وخصم $${tax} ضريبة.`);
-    setTransferCredits('');
   };
 
-  const handleCreateExpense = (e) => {
+  const handleCreateExpense = async (e) => {
     e.preventDefault();
-    if (!expenseTitle || !expenseAmount) return;
+    if (!expenseTitle.trim() || !expenseAmount || isSubmitting) return;
 
-    if (onAddExpense) {
-      onAddExpense({
-        id: Date.now().toString(),
-        title: expenseTitle,
-        amount: parseFloat(expenseAmount),
-        currency: expenseCurrency,
-        date: new Date().toISOString()
-      });
+    const numAmount = parseFloat(expenseAmount) || 0;
+    if (numAmount <= 0) return;
+
+    if (expenseWalletId) {
+      const targetWallet = sources.find(s => s.id === expenseWalletId);
+      if (targetWallet) {
+        const avail = expenseCurrency === 'LBP'
+          ? parseFloat(targetWallet.balanceLBP || 0)
+          : parseFloat(targetWallet.balanceUSD ?? targetWallet.balance ?? 0);
+        if (numAmount > avail) {
+          alert(`رصيد المحفظة (${avail.toLocaleString()} ${expenseCurrency}) لا يكفي لخصم هذا المصروف!`);
+          return;
+        }
+      }
     }
 
-    setExpenseTitle('');
-    setExpenseAmount('');
-    alert('تم تسجيل المصروف بنجاح!');
+    try {
+      setIsSubmitting(true);
+      if (onAddExpense) {
+        await onAddExpense({
+          title: expenseTitle.trim(),
+          amount: numAmount,
+          currency: expenseCurrency,
+          sourceWalletId: expenseWalletId || null,
+          notes: expenseNotes.trim()
+        });
+      }
+      setExpenseTitle('');
+      setExpenseAmount('');
+      setExpenseNotes('');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
-  const todaySales = salesHistory.filter(s => s.date && s.date.startsWith(todayStr));
+  const todaySales = salesHistory.filter(s => {
+    const dStr = s.date || s.createdAt || s.created_at || '';
+    return dStr.toString().startsWith(todayStr);
+  });
+
+  const todayExpenses = expenses.filter(exp => {
+    const dStr = exp.date || exp.createdAt || exp.created_at || '';
+    return dStr.toString().startsWith(todayStr);
+  });
 
   let totalSalesUSD = 0;
   let totalProfitsUSD = 0;
@@ -118,19 +149,20 @@ export default function QuickToolsModal({
     const isLBP = item.currency === 'LBP';
     const saleUSD = isLBP ? sale / exchangeRate : sale;
     const costUSD = parseFloat(item.costUSD) || 0;
+    const profit = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, saleUSD - costUSD);
     totalSalesUSD += saleUSD;
-    totalProfitsUSD += (saleUSD - costUSD);
+    totalProfitsUSD += profit;
   });
 
-  const totalExpensesUSD = expenses.reduce((sum, e) => {
+  const totalTodayExpensesUSD = todayExpenses.reduce((sum, e) => {
     const a = parseFloat(e.amount) || 0;
     return sum + (e.currency === 'LBP' ? a / exchangeRate : a);
   }, 0);
 
-  const totalWalletsUSD = sources.reduce((sum, s) => sum + (parseFloat(s.balance) || 0), 0);
-  const netDailyCashUSD = totalProfitsUSD - totalExpensesUSD;
+  const totalWalletsUSD = sources.reduce((sum, s) => sum + (parseFloat(s.balanceUSD ?? s.balance ?? 0)), 0);
+  const totalWalletsLBP = sources.reduce((sum, s) => sum + (parseFloat(s.balanceLBP || 0)), 0);
+  const netDailyCashUSD = totalProfitsUSD - totalTodayExpensesUSD;
 
-  // طباعة تقرير إقفال الصندوق بنظام الفواتير الموحد والفاخر
   const printCloseoutInvoice = () => {
     const items = todaySales.map(item => {
       const priceFormatted = item.currency === 'LBP'
@@ -138,7 +170,7 @@ export default function QuickToolsModal({
         : `$${parseFloat(item.sellingPrice).toFixed(2)}`;
       return {
         name: item.itemName || item.simName || item.title || 'عملية بيع',
-        sub: `${item.customerName || 'عام'} • ${formatDateTime(item.date || Date.now())}`,
+        sub: `${item.customerName || 'عام'} • ${formatDateTime(item.date || item.createdAt || Date.now())}`,
         price: priceFormatted
       };
     });
@@ -148,14 +180,14 @@ export default function QuickToolsModal({
       customerName: 'الإدارة والمالية الداخلية',
       customerPhone: shopPhone,
       dateStr: formatDateTime(new Date()),
-      items: items,
+      items,
       totals: {
-        subTotal: `$${totalSalesUSD.toFixed(2)} (${Math.round(totalSalesUSD * exchangeRate).toLocaleString()} L.L)`,
-        debts: totalExpensesUSD > 0 ? `-$${totalExpensesUSD.toFixed(2)} (إجمالي مصاريف اليوم)` : null,
-        profit: `+$${totalProfitsUSD.toFixed(2)} (صافي أرباح العمليات اليومية)`,
-        grandTotal: `$${netDailyCashUSD.toFixed(2)} (صافي ربح الصندوق بعد المصروف)`
+        subTotal: `$${totalSalesUSD.toFixed(2)}`,
+        debts: totalTodayExpensesUSD > 0 ? `-$${totalTodayExpensesUSD.toFixed(2)} (مصاريف اليوم)` : null,
+        profit: `+$${totalProfitsUSD.toFixed(2)} (صافي أرباح اليوم)`,
+        grandTotal: `$${netDailyCashUSD.toFixed(2)} (صافي الربح بعد المصروف)`
       },
-      notes: `إجمالي السيولة النقدية بالمحافظ حالياً: $${totalWalletsUSD.toFixed(2)} • عدد العمليات المنفذة: ${todaySales.length}`,
+      notes: `السيولة بالمحافظ: $${totalWalletsUSD.toFixed(2)} | ${Math.round(totalWalletsLBP).toLocaleString()} ل.ل • عدد العمليات: ${todaySales.length}`,
       accentColor: '#10B981',
       shopName: brandConfig?.name,
       shopSubtitle: brandConfig?.subtitle,
@@ -170,11 +202,11 @@ export default function QuickToolsModal({
 📞 هاتف المحل: ${shopPhone}
 ---------------------------
 🔹 عدد العمليات: ${todaySales.length}
-💵 مبيعات اليوم: $${totalSalesUSD.toFixed(2)} (≈ ${Math.round(totalSalesUSD * exchangeRate).toLocaleString()} LBP)
-🔻 المصاريف المشطوبة: -$${totalExpensesUSD.toFixed(2)}
+💵 مبيعات اليوم: $${totalSalesUSD.toFixed(2)}
+🔻 مصاريف اليوم: -$${totalTodayExpensesUSD.toFixed(2)}
 📈 صافي الأرباح المحققة: +$${totalProfitsUSD.toFixed(2)}
 ⚖️ الصافي بعد خصم المصاريف: $${netDailyCashUSD.toFixed(2)}
-💼 السيولة المتوفرة بالمحافظ: $${totalWalletsUSD.toFixed(2)}
+💼 السيولة المتوفرة: $${totalWalletsUSD.toFixed(2)} | ${Math.round(totalWalletsLBP).toLocaleString()} ل.ل
 ---------------------------
 تم الإقفال بنجاح ✅`;
 
@@ -199,7 +231,7 @@ export default function QuickToolsModal({
         <div style={{ display: 'flex', gap: '6px', background: 'var(--bg-card-sub)', padding: '4px', borderRadius: '12px', marginBottom: '16px' }}>
           <button
             type="button"
-            onClick={() => { setActiveTab('transfer'); setShowCloseoutReport(false); }}
+            onClick={() => setActiveTab('transfer')}
             style={{
               flex: 1,
               padding: '8px 4px',
@@ -222,7 +254,7 @@ export default function QuickToolsModal({
 
           <button
             type="button"
-            onClick={() => { setActiveTab('expense'); setShowCloseoutReport(false); }}
+            onClick={() => setActiveTab('expense')}
             style={{
               flex: 1,
               padding: '8px 4px',
@@ -298,7 +330,9 @@ export default function QuickToolsModal({
             {transferError && <div style={{ color: 'var(--red)', fontSize: '12px', fontWeight: 'bold' }}>{transferError}</div>}
             {transferSuccess && <div style={{ color: 'var(--green)', fontSize: '12px', fontWeight: 'bold' }}>{transferSuccess}</div>}
 
-            <button type="submit" className="btn-primary" style={{ marginTop: '6px' }}>تأكيد تحويل الرصيد</button>
+            <button type="submit" disabled={isSubmitting} className="btn-primary" style={{ marginTop: '6px', opacity: isSubmitting ? 0.6 : 1 }}>
+              {isSubmitting ? 'جاري التحويل...' : 'تأكيد تحويل الرصيد'}
+            </button>
           </form>
         )}
 
@@ -306,6 +340,7 @@ export default function QuickToolsModal({
         {activeTab === 'expense' && (
           <form onSubmit={handleCreateExpense} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <input type="text" placeholder="البيان (كهرباء، ضيافة، إيجار...)" className="tz-input" value={expenseTitle} onChange={e => setExpenseTitle(e.target.value)} required />
+
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
               <input type="number" step="any" placeholder="المبلغ" className="tz-input" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} required />
               <select className="tz-select" value={expenseCurrency} onChange={e => setExpenseCurrency(e.target.value)}>
@@ -313,14 +348,29 @@ export default function QuickToolsModal({
                 <option value="USD">$</option>
               </select>
             </div>
-            <button type="submit" className="btn-primary" style={{ marginTop: '6px' }}>تسجيل المصروف</button>
+
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>خصم من محفظة (اختياري):</label>
+              <select className="tz-select" value={expenseWalletId} onChange={e => setExpenseWalletId(e.target.value)}>
+                <option value="">-- تسجيل مصروف عام بدون خصم محفظة --</option>
+                {sources.map(w => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} (${parseFloat(w.balanceUSD ?? w.balance ?? 0).toFixed(2)} | {Math.round(parseFloat(w.balanceLBP || 0)).toLocaleString()} ل.ل)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button type="submit" disabled={isSubmitting} className="btn-primary" style={{ marginTop: '6px', opacity: isSubmitting ? 0.6 : 1 }}>
+              {isSubmitting ? 'جاري الحفظ...' : 'تسجيل المصروف'}
+            </button>
 
             {expenses.length > 0 && (
               <div style={{ marginTop: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '6px' }}>آخر المصاريف:</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '120px', overflowY: 'auto' }}>
-                  {expenses.slice(0, 4).map((exp, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-card-sub)', padding: '6px 8px', borderRadius: '8px', fontSize: '11px' }}>
+                  {expenses.slice(0, 5).map((exp, i) => (
+                    <div key={exp.id || i} style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-card-sub)', padding: '6px 8px', borderRadius: '8px', fontSize: '11px' }}>
                       <span>{exp.title}</span>
                       <span style={{ color: 'var(--red)', fontWeight: 'bold' }}>-{parseFloat(exp.amount).toLocaleString()} {exp.currency}</span>
                     </div>
@@ -341,20 +391,24 @@ export default function QuickToolsModal({
                 <span style={{ fontWeight: 'bold' }}>{todaySales.length} عملية</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>إجمالي المبيعات المحصلة:</span>
+                <span style={{ color: 'var(--text-muted)' }}>إجمالي مبيعات اليوم:</span>
                 <span style={{ fontWeight: 'bold' }}>${totalSalesUSD.toFixed(2)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>المصاريف المشطوبة:</span>
-                <span style={{ fontWeight: 'bold', color: 'var(--red)' }}>-${totalExpensesUSD.toFixed(2)}</span>
+                <span style={{ color: 'var(--text-muted)' }}>مصاريف اليوم المشطوبة:</span>
+                <span style={{ fontWeight: 'bold', color: 'var(--red)' }}>-${totalTodayExpensesUSD.toFixed(2)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>صافي أرباح العمليات:</span>
+                <span style={{ color: 'var(--text-muted)' }}>صافي أرباح اليوم:</span>
                 <span style={{ fontWeight: 'bold', color: 'var(--green)' }}>+${totalProfitsUSD.toFixed(2)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
-                <span style={{ fontWeight: 'bold' }}>صافي ربح الصندوق بعد المصروف:</span>
+                <span style={{ fontWeight: 'bold' }}>صافي الربح بعد المصروف:</span>
                 <span style={{ fontWeight: '900', color: 'var(--orange-primary)' }}>${netDailyCashUSD.toFixed(2)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px dashed var(--border-color)', paddingTop: '6px' }}>
+                <span>السيولة بالمحافظ:</span>
+                <span><b>${totalWalletsUSD.toFixed(2)}</b> • <b>{Math.round(totalWalletsLBP).toLocaleString()} ل.ل</b></span>
               </div>
             </div>
 
