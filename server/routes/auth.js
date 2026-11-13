@@ -33,9 +33,9 @@ router.post('/register', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
 
-        const shopName = name ? name.trim() : 'ZOLFA TECH';
-        const shopSubtitle = subtitle ? subtitle.trim() : 'OS TELECOM';
-        const shopPhone = phone ? phone.trim() : '78877026';
+        const shopName = name ? name.trim() : '';
+        const shopSubtitle = subtitle ? subtitle.trim() : '';
+        const shopPhone = phone ? phone.trim() : '';
 
         await pool.query(
             `INSERT INTO shops (id, email, password_hash, name, subtitle, phone, exchange_rate)
