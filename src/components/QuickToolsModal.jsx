@@ -7,7 +7,9 @@ import {
   Receipt,
   Lock,
   Printer,
-  MessageCircle
+  MessageCircle,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 
 export default function QuickToolsModal({
@@ -37,9 +39,14 @@ export default function QuickToolsModal({
   const [expenseWalletId, setExpenseWalletId] = useState('');
   const [expenseNotes, setExpenseNotes] = useState('');
 
+  // حقول مطابقة الكاش الفعلي في الدرج
+  const [drawerWalletId, setDrawerWalletId] = useState('all');
+  const [actualDrawerUSD, setActualDrawerUSD] = useState('');
+  const [actualDrawerLBP, setActualDrawerLBP] = useState('');
+
   if (!isOpen) return null;
 
-  const shopPhone = brandConfig?.phone || '78877026';
+  const shopPhone = brandConfig?.phone || '';
 
   const getSimBalance = (sim) => {
     if (!sim) return 0;
@@ -132,9 +139,23 @@ export default function QuickToolsModal({
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
+  const nonSaleTypes = new Set([
+    'card_purchase',
+    'wallet_deposit',
+    'wallet_withdrawal',
+    'wallet_transfer',
+    'fx_exchange',
+    'source_adjust',
+    'debt_create',
+    'debt_payment',
+    'expense',
+    'sim_transfer',
+    'sim_topup'
+  ]);
+
   const todaySales = salesHistory.filter(s => {
     const dStr = s.date || s.createdAt || s.created_at || '';
-    return dStr.toString().startsWith(todayStr);
+    return dStr.toString().startsWith(todayStr) && !nonSaleTypes.has(s.type);
   });
 
   const todayExpenses = expenses.filter(exp => {
@@ -163,6 +184,31 @@ export default function QuickToolsModal({
   const totalWalletsLBP = sources.reduce((sum, s) => sum + (parseFloat(s.balanceLBP || 0)), 0);
   const netDailyCashUSD = totalProfitsUSD - totalTodayExpensesUSD;
 
+  // حسابات مطابقة الدرج الفعلي
+  const targetDrawerObj = drawerWalletId === 'all' ? null : sources.find(s => s.id === drawerWalletId);
+  const expectedUSD = targetDrawerObj
+    ? parseFloat(targetDrawerObj.balanceUSD ?? targetDrawerObj.balance ?? 0)
+    : totalWalletsUSD;
+  const expectedLBP = targetDrawerObj
+    ? parseFloat(targetDrawerObj.balanceLBP || 0)
+    : totalWalletsLBP;
+
+  const hasEnteredCount = actualDrawerUSD !== '' || actualDrawerLBP !== '';
+  const countedUSD = actualDrawerUSD === '' ? expectedUSD : (parseFloat(actualDrawerUSD) || 0);
+  const countedLBP = actualDrawerLBP === '' ? expectedLBP : (parseFloat(actualDrawerLBP) || 0);
+  const diffUSD = parseFloat((countedUSD - expectedUSD).toFixed(2));
+  const diffLBP = Math.round(countedLBP - expectedLBP);
+  const isMatched = Math.abs(diffUSD) <= 0.05 && Math.abs(diffLBP) <= 1000;
+
+  const getReconciliationNote = () => {
+    if (!hasEnteredCount) return '';
+    const scopeName = targetDrawerObj ? targetDrawerObj.name : 'كافة الصناديق';
+    if (isMatched) {
+      return `جرد الدرج (${scopeName}): مطابقة تامة 100% ($${countedUSD.toFixed(2)} | ${Math.round(countedLBP).toLocaleString()} ل.ل).`;
+    }
+    return `جرد الدرج (${scopeName}): الفعلي $${countedUSD.toFixed(2)} (${Math.round(countedLBP).toLocaleString()} ل.ل) • الفرق: ${diffUSD >= 0 ? '+' : ''}$${diffUSD.toFixed(2)} | ${diffLBP >= 0 ? '+' : ''}${diffLBP.toLocaleString()} ل.ل.`;
+  };
+
   const printCloseoutInvoice = () => {
     const items = todaySales.map(item => {
       const priceFormatted = item.currency === 'LBP'
@@ -174,6 +220,8 @@ export default function QuickToolsModal({
         price: priceFormatted
       };
     });
+
+    const reconNote = getReconciliationNote();
 
     openPrintableReceipt({
       title: 'تقرير إقفال الصندوق اليومي',
@@ -187,7 +235,7 @@ export default function QuickToolsModal({
         profit: `+$${totalProfitsUSD.toFixed(2)} (صافي أرباح اليوم)`,
         grandTotal: `$${netDailyCashUSD.toFixed(2)} (صافي الربح بعد المصروف)`
       },
-      notes: `السيولة بالمحافظ: $${totalWalletsUSD.toFixed(2)} | ${Math.round(totalWalletsLBP).toLocaleString()} ل.ل • عدد العمليات: ${todaySales.length}`,
+      notes: `السيولة بالمحافظ: $${totalWalletsUSD.toFixed(2)} | ${Math.round(totalWalletsLBP).toLocaleString()} ل.ل • عدد المبيعات: ${todaySales.length}${reconNote ? ` • ${reconNote}` : ''}`,
       accentColor: '#10B981',
       shopName: brandConfig?.name,
       shopSubtitle: brandConfig?.subtitle,
@@ -197,26 +245,29 @@ export default function QuickToolsModal({
   };
 
   const sendWhatsAppReport = () => {
+    const reconNote = getReconciliationNote();
     const text = `📊 *تقرير إقفال الصندوق اليومي - ${brandConfig?.name || 'ZOLFA TECH'}*
 📅 التاريخ: ${new Date().toLocaleDateString('ar-LB')}
-📞 هاتف المحل: ${shopPhone}
----------------------------
-🔹 عدد العمليات: ${todaySales.length}
+${shopPhone ? `📞 هاتف المحل: ${shopPhone}\n` : ''}---------------------------
+🔹 عدد المبيعات: ${todaySales.length}
 💵 مبيعات اليوم: $${totalSalesUSD.toFixed(2)}
 🔻 مصاريف اليوم: -$${totalTodayExpensesUSD.toFixed(2)}
 📈 صافي الأرباح المحققة: +$${totalProfitsUSD.toFixed(2)}
 ⚖️ الصافي بعد خصم المصاريف: $${netDailyCashUSD.toFixed(2)}
 💼 السيولة المتوفرة: $${totalWalletsUSD.toFixed(2)} | ${Math.round(totalWalletsLBP).toLocaleString()} ل.ل
----------------------------
+${reconNote ? `🧾 ${reconNote}\n` : ''}---------------------------
 تم الإقفال بنجاح ✅`;
 
     const cleanPhone = shopPhone.replace(/[^0-9]/g, '');
-    window.open(`https://wa.me/${cleanPhone.startsWith('961') ? cleanPhone : '961' + cleanPhone}?text=${encodeURIComponent(text)}`, '_blank');
+    const waUrl = cleanPhone
+      ? `https://wa.me/${cleanPhone.startsWith('961') ? cleanPhone : '961' + cleanPhone}?text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
   };
 
   return (
     <div className="modal-overlay">
-      <div className="modal-center" style={{ maxWidth: '520px' }}>
+      <div className="modal-center" style={{ maxWidth: '520px', maxHeight: '88vh', overflowY: 'auto' }}>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
@@ -381,7 +432,7 @@ export default function QuickToolsModal({
           </form>
         )}
 
-        {/* 3. إقفال الصندوق */}
+        {/* 3. إقفال الصندوق + جرد ومطابقة الكاش الفعلي في الدرج */}
         {activeTab === 'closeout' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
@@ -410,6 +461,89 @@ export default function QuickToolsModal({
                 <span>السيولة بالمحافظ:</span>
                 <span><b>${totalWalletsUSD.toFixed(2)}</b> • <b>{Math.round(totalWalletsLBP).toLocaleString()} ل.ل</b></span>
               </div>
+            </div>
+
+            {/* قسم جرد ومطابقة الكاش الفعلي في الدرج */}
+            <div style={{ background: 'var(--bg-card-sub)', padding: '12px', borderRadius: '14px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', fontWeight: '900', color: 'var(--orange-primary)' }}>
+                  جرد ومطابقة الكاش الفعلي في الدرج
+                </span>
+                <select
+                  className="tz-select"
+                  style={{ width: 'auto', height: '30px', fontSize: '11px', padding: '0 8px' }}
+                  value={drawerWalletId}
+                  onChange={e => setDrawerWalletId(e.target.value)}
+                >
+                  <option value="all">كافة الصناديق</option>
+                  {sources.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
+                <span>المتوقع بالنظام:</span>
+                <span><b>${expectedUSD.toFixed(2)}</b> • <b>{Math.round(expectedLBP).toLocaleString()} ل.ل</b></span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>المعدود الفعلي ($):</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder={expectedUSD.toFixed(2)}
+                    className="tz-input"
+                    style={{ height: '36px', fontSize: '12px', fontWeight: 'bold', marginTop: '2px' }}
+                    value={actualDrawerUSD}
+                    onChange={e => setActualDrawerUSD(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>المعدود الفعلي (ل.ل):</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder={Math.round(expectedLBP).toString()}
+                    className="tz-input"
+                    style={{ height: '36px', fontSize: '12px', fontWeight: 'bold', marginTop: '2px' }}
+                    value={actualDrawerLBP}
+                    onChange={e => setActualDrawerLBP(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {hasEnteredCount && (
+                <div style={{
+                  padding: '8px 10px',
+                  borderRadius: '10px',
+                  fontSize: '11px',
+                  fontWeight: '900',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: isMatched ? 'rgba(16, 185, 129, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+                  color: isMatched ? 'var(--green)' : 'var(--red)',
+                  border: `1px solid ${isMatched ? 'var(--green)' : 'var(--red)'}`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    {isMatched ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                    <span>
+                      {isMatched
+                        ? 'مطابقة تامة 100%'
+                        : (diffUSD < 0 || diffLBP < 0 ? 'يوجد عجز / نقص في الدرج' : 'يوجد فائض في الدرج')}
+                    </span>
+                  </div>
+                  {!isMatched && (
+                    <span style={{ direction: 'ltr' }}>
+                      {diffUSD !== 0 ? `${diffUSD > 0 ? '+' : ''}$${diffUSD.toFixed(2)}` : ''}
+                      {diffUSD !== 0 && diffLBP !== 0 ? ' | ' : ''}
+                      {diffLBP !== 0 ? `${diffLBP > 0 ? '+' : ''}${diffLBP.toLocaleString()} LBP` : ''}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>

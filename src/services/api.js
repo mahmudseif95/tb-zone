@@ -52,6 +52,7 @@ export const api = {
     deleteSource: (id) => request(`/operations/source/${id}`, { method: 'DELETE' }),
     recordWalletTx: (walletId, tx) => request('/operations/wallet-tx', { method: 'POST', body: JSON.stringify({ walletId, tx }) }),
     walletTransfer: (payload) => request('/operations/wallet-transfer', { method: 'POST', body: JSON.stringify(payload) }),
+    buyCard: (cardPayload) => request('/operations/buy-card', { method: 'POST', body: JSON.stringify(cardPayload) }),
 
     // 4. الشرائح ودفعات الرصيد
     addSim: (simData) => request('/operations/sim', { method: 'POST', body: JSON.stringify(simData) }),
@@ -60,21 +61,25 @@ export const api = {
     transferSimBalance: (payload) => request('/operations/sim-transfer', { method: 'POST', body: JSON.stringify(payload) }),
     executeSale: (salePayload) => request('/operations/sale', { method: 'POST', body: JSON.stringify(salePayload) }),
 
-    // 5. الخطوط المسكرة
+    // 5. الخطوط المسكرة والمفتوحة
     addLine: (lineData) => request('/operations/line', { method: 'POST', body: JSON.stringify(lineData) }),
     updateLine: (id, fields) => request(`/operations/line/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
     deleteLine: (id) => request(`/operations/line/${id}`, { method: 'DELETE' }),
 
-    // 6. Alfa Gift & U-Share
+    // 6. Alfa Gift & U-Share والدورات المفتوحة
     executeAlfaGiftSale: (giftPayload) => request('/operations/alfa-gift-sale', { method: 'POST', body: JSON.stringify(giftPayload) }),
+    addCycleUser: (cycleUserPayload) => request('/operations/cycle-add-user', { method: 'POST', body: JSON.stringify(cycleUserPayload) }),
 
-    // 7. الديون (مع عزل العملة التام)
+    // 7. التراجع المتسلسل عن أي عملية (Cascading Rollback)
+    rollbackOperation: (opId) => request(`/operations/rollback/${opId}`, { method: 'DELETE' }),
+
+    // 8. الديون (مع عزل العملة التام)
     addDebt: (debtData) => request('/operations/debt', { method: 'POST', body: JSON.stringify(debtData) }),
     updateDebt: (id, fields) => request(`/operations/debt/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
     deleteDebt: (id) => request(`/operations/debt/${id}`, { method: 'DELETE' }),
     payDebt: (debtPaymentPayload) => request('/operations/debt-payment', { method: 'POST', body: JSON.stringify(debtPaymentPayload) }),
 
-    // 8. الزبائن والمصاريف
+    // 9. الزبائن والمصاريف
     addCustomer: (custData) => request('/operations/customer', { method: 'POST', body: JSON.stringify(custData) }),
     updateCustomer: (id, fields) => request(`/operations/customer/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
     deleteCustomer: (id) => request(`/operations/customer/${id}`, { method: 'DELETE' }),

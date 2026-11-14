@@ -29,8 +29,43 @@ import {
   Sun,
   Moon,
   Check,
-  ListOrdered
+  ListOrdered,
+  RotateCcw,
+  Info
 } from 'lucide-react';
+
+const OP_TYPE_META = {
+  card_purchase: { label: 'شراء كارت', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.14)' },
+  days_year: { label: 'دورة سنة أيام', color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.14)' },
+  ushare: { label: 'U-Share', color: '#FF7A00', bg: 'rgba(255, 122, 0, 0.14)' },
+  alfa_gift: { label: 'Alfa Gift', color: '#EC4899', bg: 'rgba(236, 72, 153, 0.14)' },
+  recharge_sale: { label: 'بيع رصيد', color: '#10B981', bg: 'rgba(16, 185, 129, 0.14)' },
+  wallet_sale: { label: 'مبيع محفظة', color: '#10B981', bg: 'rgba(16, 185, 129, 0.14)' },
+  wallet_deposit: { label: 'إيداع محفظة', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.14)' },
+  wallet_withdrawal: { label: 'سحب محفظة', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.14)' },
+  wallet_transfer: { label: 'تحويل محافظ', color: '#06B6D4', bg: 'rgba(6, 182, 212, 0.14)' },
+  fx_exchange: { label: 'صرافة FX', color: '#14B8A6', bg: 'rgba(20, 184, 166, 0.14)' },
+  source_adjust: { label: 'تسوية صندوق', color: '#6366F1', bg: 'rgba(99, 102, 241, 0.14)' },
+  debt_create: { label: 'تسجيل دين', color: '#F43F5E', bg: 'rgba(244, 63, 94, 0.14)' },
+  debt_payment: { label: 'تسديد دين', color: '#22C55E', bg: 'rgba(34, 197, 94, 0.14)' },
+  expense: { label: 'مصروف', color: '#E11D48', bg: 'rgba(225, 29, 72, 0.14)' },
+  sim_transfer: { label: 'تحويل شرائح', color: '#0EA5E9', bg: 'rgba(14, 165, 233, 0.14)' },
+  sim_topup: { label: 'تعبئة شريحة', color: '#A855F7', bg: 'rgba(168, 85, 247, 0.14)' }
+};
+
+const NON_SALE_OP_TYPES = new Set([
+  'card_purchase',
+  'wallet_deposit',
+  'wallet_withdrawal',
+  'wallet_transfer',
+  'fx_exchange',
+  'source_adjust',
+  'debt_create',
+  'debt_payment',
+  'expense',
+  'sim_transfer',
+  'sim_topup'
+]);
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('zt_token')));
@@ -41,6 +76,8 @@ export default function App() {
   const [showToolsModal, setShowToolsModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [toast, setToast] = useState(null);
+  const [txFilter, setTxFilter] = useState('all'); // 'all' | 'sales' | 'cards' | 'wallets' | 'debts_exp'
+  const [rollingBackId, setRollingBackId] = useState(null);
 
   const showNotification = (message, subMessage = '') => {
     setToast({ message, subMessage });
@@ -100,6 +137,8 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  const [serviceCycles, setServiceCycles] = useState([]);
+
   const [debts, setDebts] = useState(() => {
     const saved = localStorage.getItem('tb_debts');
     return saved ? JSON.parse(saved) : [];
@@ -128,7 +167,6 @@ export default function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [currentTx, setCurrentTx] = useState({});
 
-  // جلب كافة بيانات المتجر من MySQL
   const loadDataFromServer = useCallback(async () => {
     try {
       const data = await api.fetchBootstrapData();
@@ -140,6 +178,7 @@ export default function App() {
       if (data.sources) setSources(data.sources);
       if (data.sims) setSims(data.sims);
       if (data.lines) setLines(data.lines);
+      if (data.serviceCycles) setServiceCycles(data.serviceCycles);
       if (data.debts) setDebts(data.debts);
       if (data.customers) setCustomers(data.customers);
       if (data.expenses) setExpenses(data.expenses);
@@ -161,7 +200,6 @@ export default function App() {
     }
   }, [isAuthenticated, loadDataFromServer]);
 
-  // حفظ نسخة احتياطية محلية متزامنة
   useEffect(() => {
     localStorage.setItem('tb_brand_config', JSON.stringify(brandConfig));
     localStorage.setItem('tb_rate', exchangeRate.toString());
@@ -174,9 +212,6 @@ export default function App() {
     localStorage.setItem('tb_sales_history', JSON.stringify(salesHistory));
   }, [brandConfig, exchangeRate, sims, sources, lines, debts, customers, expenses, salesHistory]);
 
-  // ==========================================
-  // 1. سعر الصرف والمحافظ والصناديق
-  // ==========================================
   const handleSaveRate = async (customVal = null) => {
     const val = customVal !== null ? parseFloat(customVal) : parseFloat(tempRate);
     if (val && val > 0) {
@@ -251,9 +286,6 @@ export default function App() {
     }
   };
 
-  // ==========================================
-  // 2. الشرائح ودفعات الرصيد (SIMs)
-  // ==========================================
   const handleAddSimBatch = async (newSim) => {
     try {
       await api.addSim(newSim);
@@ -309,9 +341,6 @@ export default function App() {
     }
   };
 
-  // ==========================================
-  // 3. الخطوط المسكرة والمفتوحة (Lines)
-  // ==========================================
   const handleAddLine = async (newLine) => {
     try {
       await api.addLine(newLine);
@@ -364,9 +393,6 @@ export default function App() {
     }
   };
 
-  // ==========================================
-  // 4. عمليات البيع و Alfa Gift و U-Share
-  // ==========================================
   const handleExecuteAlfaGiftSale = async (giftData) => {
     try {
       await api.executeAlfaGiftSale(giftData);
@@ -428,6 +454,27 @@ export default function App() {
     }
   };
 
+  const handleRollbackOperation = async (op) => {
+    const isRoot = op.type === 'card_purchase' || op.type === 'days_year' || op.meta?.isCycleRoot;
+    const confirmMsg = isRoot
+      ? 'تنبيه: هذه عملية أساسية مرتبطة بدورة!\nالتراجع عنها سيحذف تلقائياً كافة المشتركين والديون والحصص المندرجة تحتها، ويُعيد الأرصدة والمبالغ إلى المحفظة والخط.\n\nهل تريد تأكيد التراجع الكامل؟'
+      : 'هل تريد التراجع عن هذه العملية؟ سيتم عكس أثرها المالي وإلغاء أي دين أو مصروف مرتبط بها.';
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setRollingBackId(op.id);
+      await api.rollbackOperation(op.id);
+      await loadDataFromServer();
+      showNotification('تم التراجع عن العملية بنجاح', 'تمت استعادة الأرصدة وإلغاء القيود المرتبطة');
+    } catch (err) {
+      console.error('Rollback error:', err);
+      showNotification('فشل التراجع عن العملية', err.message);
+    } finally {
+      setRollingBackId(null);
+    }
+  };
+
   const handleRecordDebtSale = (debtSaleData) => {
     const saleUSD = debtSaleData.currency === 'LBP' ? (parseFloat(debtSaleData.sellingPrice) / exchangeRate) : parseFloat(debtSaleData.sellingPrice);
     const costUSD = parseFloat(debtSaleData.costUSD || 0);
@@ -442,9 +489,6 @@ export default function App() {
     setSalesHistory(prev => [recordWithProfit, ...prev]);
   };
 
-  // ==========================================
-  // 5. الزبائن والمصاريف
-  // ==========================================
   const handleAddCustomer = async (c) => {
     try {
       await api.addCustomer(c);
@@ -508,7 +552,15 @@ export default function App() {
   const totalBalanceUSD = sources.reduce((acc, curr) => acc + (parseFloat(curr.balanceUSD ?? curr.balance ?? 0)), 0).toFixed(2);
   const unreadDebtsCount = debts.filter(d => !d.paid).length;
 
-  // في حال لم يكن مسجل الدخول، يتم عرض شاشة الدخول أولاً
+  const filteredOperations = salesHistory.filter(item => {
+    if (txFilter === 'all') return true;
+    if (txFilter === 'cards') return item.type === 'card_purchase' || item.type === 'days_year' || item.type === 'sim_topup' || item.type === 'sim_transfer';
+    if (txFilter === 'wallets') return ['wallet_deposit', 'wallet_withdrawal', 'wallet_transfer', 'fx_exchange', 'source_adjust'].includes(item.type);
+    if (txFilter === 'debts_exp') return ['debt_create', 'debt_payment', 'expense'].includes(item.type);
+    if (txFilter === 'sales') return ['recharge_sale', 'ushare', 'alfa_gift', 'wallet_sale', 'sale'].includes(item.type);
+    return true;
+  });
+
   if (!isAuthenticated) {
     return (
       <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: 'var(--bg-main)' }}>
@@ -531,7 +583,6 @@ export default function App() {
         />
       )}
 
-      {/* نافذة إعداد هوية المتجر عند أول دخول لأي زبون */}
       <ShopSetupModal
         isOpen={hasLoadedServerData && !brandConfig?.name?.trim()}
         onComplete={(newBrand) => setBrandConfig(prev => ({ ...prev, ...newBrand }))}
@@ -744,6 +795,8 @@ export default function App() {
             salesHistory={salesHistory}
             lines={lines}
             debts={debts}
+            customers={customers}
+            brandConfig={brandConfig}
             exchangeRate={exchangeRate}
             onNavigate={(tab) => setCurrentTab(tab)}
             onUpdateSourceBalance={handleUpdateSourceBalance}
@@ -752,42 +805,155 @@ export default function App() {
 
         {currentTab === 'transactions' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div className="tz-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900' }}>سجل العمليات والحركات</h3>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>إجمالي العمليات: {salesHistory.length}</span>
+            <div className="tz-card" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900' }}>سجل العمليات الشامل</h3>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    كافة الحركات مع الشرح والتراجع المتسلسل ({filteredOperations.length})
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' }}>
+                {[
+                  { id: 'all', label: 'الكل' },
+                  { id: 'sales', label: 'المبيعات' },
+                  { id: 'cards', label: 'الكروت' },
+                  { id: 'wallets', label: 'المحافظ' },
+                  { id: 'debts_exp', label: 'ديون/مصاريف' }
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setTxFilter(f.id)}
+                    style={{
+                      padding: '6px 2px',
+                      borderRadius: '8px',
+                      border: txFilter === f.id ? '1px solid var(--orange-primary)' : '1px solid var(--border-color)',
+                      background: txFilter === f.id ? 'var(--orange-primary)' : 'var(--bg-input)',
+                      color: txFilter === f.id ? '#fff' : 'var(--text-main)',
+                      fontSize: '10px',
+                      fontWeight: '900',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {salesHistory.length === 0 ? (
+              {filteredOperations.length === 0 ? (
                 <div className="tz-card" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                  لا توجد عمليات مسجلة بعد.
+                  لا توجد عمليات مسجلة تحت هذا القسم بعد.
                 </div>
               ) : (
-                salesHistory.map((item, idx) => {
-                  const saleUSD = item.currency === 'LBP' ? (item.sellingPrice / exchangeRate) : item.sellingPrice;
-                  const profitUSD = item.profitUSD !== undefined ? item.profitUSD : Math.max(0, saleUSD - (item.costUSD || 0));
+                filteredOperations.map((item, idx) => {
+                  const rawPrice = parseFloat(item.sellingPrice) || 0;
+                  const isLBP = item.currency === 'LBP';
+                  const saleUSD = isLBP ? (rawPrice / exchangeRate) : rawPrice;
+                  const profitUSD = item.profitUSD !== undefined ? parseFloat(item.profitUSD) : Math.max(0, saleUSD - (item.costUSD || 0));
+                  const opMeta = OP_TYPE_META[item.type] || { label: 'عملية', color: 'var(--orange-primary)', bg: 'rgba(255,122,0,0.12)' };
+                  const isNonSale = NON_SALE_OP_TYPES.has(item.type);
+                  const isRootCycle = item.type === 'card_purchase' || item.type === 'days_year' || item.meta?.isCycleRoot;
 
                   return (
-                    <div key={item.id || idx} className="tz-card" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: '900', fontSize: '13px', color: 'var(--orange-primary)' }}>{item.itemName || item.title}</span>
-                        <span style={{ fontWeight: '900', fontSize: '14px' }}>
-                          {parseFloat(item.sellingPrice).toLocaleString()} {item.currency === 'LBP' ? 'ل.ل' : '$'}
+                    <div
+                      key={item.id || idx}
+                      className="tz-card"
+                      style={{
+                        padding: '12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '7px',
+                        borderRight: `3.5px solid ${opMeta.color}`
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: '900',
+                            color: opMeta.color,
+                            background: opMeta.bg,
+                            padding: '2px 7px',
+                            borderRadius: '6px'
+                          }}>
+                            {opMeta.label}
+                          </span>
+                          <span style={{ fontWeight: '900', fontSize: '13px', color: 'var(--text-main)' }}>
+                            {item.itemName || item.title}
+                          </span>
+                        </div>
+
+                        <span style={{ fontWeight: '900', fontSize: '14px', color: isLBP ? 'var(--orange-primary)' : 'var(--text-main)', flexShrink: 0 }}>
+                          {isLBP ? `${Math.round(rawPrice).toLocaleString()} ل.ل` : `$${rawPrice.toFixed(2)}`}
                         </span>
                       </div>
+
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
-                        <span>الزبون: <b>{item.customerName || 'عام'}</b></span>
-                        <span style={{ color: 'var(--green)', fontWeight: 'bold' }}>صافي الربح: +${parseFloat(profitUSD).toFixed(2)}</span>
+                        <span>الجهة / العميل: <b>{item.customerName || 'عام'}</b></span>
+                        {!isNonSale && (
+                          <span style={{ color: profitUSD > 0 ? 'var(--green)' : 'var(--orange-primary)', fontWeight: 'bold' }}>
+                            {profitUSD > 0 ? `صافي الربح: +$${profitUSD.toFixed(2)}` : 'استرداد رأس مال'}
+                          </span>
+                        )}
                       </div>
-                      {item.notes && (
+
+                      {item.explanation && (
+                        <div style={{
+                          background: 'var(--bg-card-sub)',
+                          padding: '8px 10px',
+                          borderRadius: '9px',
+                          border: '1px dashed var(--border-color)',
+                          fontSize: '11px',
+                          color: 'var(--text-main)',
+                          lineHeight: '1.5',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '6px'
+                        }}>
+                          <Info size={14} color={opMeta.color} style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <span>{item.explanation}</span>
+                        </div>
+                      )}
+
+                      {!item.explanation && item.notes && (
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                           {item.notes}
                         </div>
                       )}
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'left', direction: 'ltr' }}>
-                        {formatDateTime(item.date)}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px', borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
+                        <button
+                          type="button"
+                          disabled={rollingBackId === item.id}
+                          onClick={() => handleRollbackOperation(item)}
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid rgba(239, 68, 68, 0.35)',
+                            color: 'var(--red)',
+                            borderRadius: '8px',
+                            padding: '4px 9px',
+                            fontSize: '10px',
+                            fontWeight: '900',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            opacity: rollingBackId === item.id ? 0.5 : 1
+                          }}
+                          title={isRootCycle ? 'تراجع كامل عن الدورة وكل ما اندرج تحتها' : 'تراجع وإلغاء العملية'}
+                        >
+                          <RotateCcw size={12} />
+                          <span>{rollingBackId === item.id ? 'جاري التراجع...' : isRootCycle ? 'تراجع كامل عن الدورة' : 'تراجع وإلغاء'}</span>
+                        </button>
+
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', direction: 'ltr' }}>
+                          {formatDateTime(item.date)}
+                        </span>
                       </div>
                     </div>
                   );
@@ -841,7 +1007,9 @@ export default function App() {
             sims={sims}
             lockedLines={lines}
             customers={customers}
+            serviceCycles={serviceCycles}
             onExecuteAlfaGiftSale={handleExecuteAlfaGiftSale}
+            onRefreshData={loadDataFromServer}
             exchangeRate={exchangeRate}
           />
         )}
@@ -928,6 +1096,7 @@ export default function App() {
         expenses={expenses}
         sources={sources}
         salesHistory={salesHistory}
+        debts={debts}
         brandConfig={brandConfig}
       />
 

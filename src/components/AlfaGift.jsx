@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { api } from '../services/api';
 import {
     Gift,
     Share2,
@@ -9,14 +10,19 @@ import {
     User,
     Users,
     RefreshCw,
-    CheckCircle2
+    CheckCircle2,
+    Layers,
+    UserPlus,
+    X
 } from 'lucide-react';
 
 export default function AlfaGift({
     sims = [],
     lockedLines = [],
     customers = [],
+    serviceCycles = [],
     onExecuteAlfaGiftSale,
+    onRefreshData,
     exchangeRate = 89500
 }) {
     const ALFA_GIFT_TIERS = [
@@ -54,6 +60,70 @@ export default function AlfaGift({
     const [giftRecipients, setGiftRecipients] = useState([
         { name: '', phone: '', gb: '22', price: '', currency: 'USD', isDebt: false }
     ]);
+
+    // حالة إضافة مشترك لدورة مفتوحة قائمة
+    const [activeCycleId, setActiveCycleId] = useState(null);
+    const [cycleUserForm, setCycleUserForm] = useState({
+        name: '',
+        phone: '',
+        gb: '22',
+        price: '',
+        currency: 'USD',
+        isDebt: false
+    });
+    const [isAddingCycleUser, setIsAddingCycleUser] = useState(false);
+
+    const openCycles = serviceCycles.filter(c => c.status === 'open');
+
+    const handleOpenCycleAddForm = (cycle) => {
+        const remGB = Math.max(0, (parseFloat(cycle.totalGB) || 0) - (parseFloat(cycle.allocatedGB) || 0));
+        setActiveCycleId(cycle.id);
+        setCycleUserForm({
+            name: '',
+            phone: '',
+            gb: remGB > 0 ? String(Math.min(22, remGB)) : '22',
+            price: '',
+            currency: 'USD',
+            isDebt: false
+        });
+    };
+
+    const handleConfirmCycleUser = async (e) => {
+        e.preventDefault();
+        if (!activeCycleId || isAddingCycleUser) return;
+
+        if (!cycleUserForm.name.trim()) {
+            alert('يرجى إدخال اسم المشترك الجديد!');
+            return;
+        }
+        const priceNum = parseFloat(cycleUserForm.price) || 0;
+        if (priceNum <= 0) {
+            alert('يرجى إدخال سعر بيع الحصة!');
+            return;
+        }
+
+        try {
+            setIsAddingCycleUser(true);
+            await api.addCycleUser({
+                cycleId: activeCycleId,
+                name: cycleUserForm.name.trim(),
+                phone: cycleUserForm.phone.trim(),
+                gb: parseFloat(cycleUserForm.gb) || 0,
+                price: priceNum,
+                currency: cycleUserForm.currency,
+                isDebt: cycleUserForm.isDebt,
+                exchangeRate
+            });
+
+            if (onRefreshData) await onRefreshData();
+            setActiveCycleId(null);
+            alert('تمت إضافة المشترك للدورة المفتوحة وتسجيل حصته بنجاح!');
+        } catch (err) {
+            alert('فشل إضافة المشترك للدورة: ' + err.message);
+        } finally {
+            setIsAddingCycleUser(false);
+        }
+    };
 
     const handleSwitchMode = (newMode) => {
         setServiceMode(newMode);
@@ -270,6 +340,176 @@ export default function AlfaGift({
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', direction: 'rtl' }}>
+
+            {/* قسم الدورات المفتوحة على الشرائح والخطوط لإكمال إضافة المشتركين لاحقاً */}
+            {openCycles.length > 0 && (
+                <div className="tz-card" style={{ padding: '14px', border: '1.5px solid var(--orange-primary)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Layers size={18} color="var(--orange-primary)" />
+                            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '900', color: 'var(--orange-primary)' }}>
+                                دورات باقات مفتوحة (لإكمال المشتركين)
+                            </h3>
+                        </div>
+                        <span style={{ fontSize: '11px', fontWeight: '900', background: 'rgba(255,122,0,0.15)', color: 'var(--orange-primary)', padding: '2px 8px', borderRadius: '8px' }}>
+                            {openCycles.length} مفتوحة
+                        </span>
+                    </div>
+
+                    {openCycles.map((cyc) => {
+                        const simObj = sims.find(s => s.id === cyc.simId);
+                        const lineObj = lockedLines.find(l => l.id === cyc.lockedLineId);
+                        const sourceDesc = simObj
+                            ? `شريحة: ${simObj.name}`
+                            : lineObj
+                                ? `خط مسكر #${lineObj.slotNumber} (${lineObj.phoneNumber || lineObj.number || ''})`
+                                : 'مصدر محفوظ';
+                        const remGB = Math.max(0, (parseFloat(cyc.totalGB) || 0) - (parseFloat(cyc.allocatedGB) || 0));
+
+                        return (
+                            <div key={cyc.id} style={{ background: 'var(--bg-card-sub)', padding: '10px 12px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                        <div style={{ fontSize: '13px', fontWeight: '900', color: 'var(--text-main)' }}>{cyc.packageName}</div>
+                                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{sourceDesc}</div>
+                                    </div>
+                                    <div style={{ textAlign: 'left', fontSize: '11px' }}>
+                                        <div style={{ fontWeight: '900', color: 'var(--green)' }}>متبقي: {remGB} GB</div>
+                                        <div style={{ color: 'var(--text-muted)' }}>من أصل {cyc.totalGB} GB</div>
+                                    </div>
+                                </div>
+
+                                {/* خانات المشتركين الثلاثة */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', fontSize: '10px' }}>
+                                    {[cyc.user1, cyc.user2, cyc.user3].map((u, idx) => (
+                                        <div
+                                            key={idx}
+                                            style={{
+                                                padding: '6px',
+                                                borderRadius: '8px',
+                                                textAlign: 'center',
+                                                background: u ? 'rgba(16,185,129,0.12)' : 'var(--bg-main)',
+                                                border: u ? '1px solid var(--green)' : '1px dashed var(--border-color)',
+                                                color: u ? 'var(--green)' : 'var(--text-muted)',
+                                                fontWeight: 'bold'
+                                            }}
+                                        >
+                                            {u ? `${u.name} (${u.gb}G)` : `خانة #${idx + 1} شاغرة`}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {activeCycleId === cyc.id ? (
+                                    <form onSubmit={handleConfirmCycleUser} style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '10px', border: '1px solid var(--orange-primary)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '12px', fontWeight: '900', color: 'var(--orange-primary)' }}>إضافة مشترك جديد للدورة:</span>
+                                            <button type="button" onClick={() => setActiveCycleId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                                                <X size={15} />
+                                            </button>
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '6px' }}>
+                                            <input
+                                                type="text"
+                                                required
+                                                list="alfa-gift-customers-list"
+                                                placeholder="اسم المشترك..."
+                                                className="tz-input"
+                                                style={{ height: '36px', fontSize: '11px' }}
+                                                value={cycleUserForm.name}
+                                                onChange={(e) => setCycleUserForm(prev => ({ ...prev, name: e.target.value }))}
+                                            />
+                                            <input
+                                                type="tel"
+                                                placeholder="رقم الهاتف..."
+                                                className="tz-input"
+                                                style={{ height: '36px', fontSize: '11px' }}
+                                                value={cycleUserForm.phone}
+                                                onChange={(e) => setCycleUserForm(prev => ({ ...prev, phone: e.target.value }))}
+                                            />
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.1fr 0.9fr', gap: '6px' }}>
+                                            <input
+                                                type="number"
+                                                step="any"
+                                                placeholder="GB"
+                                                className="tz-input"
+                                                style={{ height: '36px', fontSize: '11px', fontWeight: 'bold' }}
+                                                value={cycleUserForm.gb}
+                                                onChange={(e) => setCycleUserForm(prev => ({ ...prev, gb: e.target.value }))}
+                                            />
+                                            <input
+                                                type="number"
+                                                step="any"
+                                                required
+                                                placeholder="السعر..."
+                                                className="tz-input"
+                                                style={{ height: '36px', fontSize: '11px', fontWeight: 'bold', color: 'var(--orange-primary)' }}
+                                                value={cycleUserForm.price}
+                                                onChange={(e) => setCycleUserForm(prev => ({ ...prev, price: e.target.value }))}
+                                            />
+                                            <select
+                                                className="tz-select"
+                                                style={{ height: '36px', fontSize: '11px' }}
+                                                value={cycleUserForm.currency}
+                                                onChange={(e) => setCycleUserForm(prev => ({ ...prev, currency: e.target.value }))}
+                                            >
+                                                <option value="USD">USD ($)</option>
+                                                <option value="LBP">LBP</option>
+                                            </select>
+                                        </div>
+
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 'bold', color: cycleUserForm.isDebt ? 'var(--red)' : 'var(--green)', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={cycleUserForm.isDebt}
+                                                    onChange={(e) => setCycleUserForm(prev => ({ ...prev, isDebt: e.target.checked }))}
+                                                    style={{ accentColor: 'var(--red)' }}
+                                                />
+                                                <span>{cycleUserForm.isDebt ? 'تسجيل كدين على المشترك' : 'مدفوع كاش'}</span>
+                                            </label>
+
+                                            <button
+                                                type="submit"
+                                                disabled={isAddingCycleUser}
+                                                className="btn-primary"
+                                                style={{ width: 'auto', padding: '6px 14px', height: '34px', fontSize: '11px' }}
+                                            >
+                                                {isAddingCycleUser ? 'جاري الحفظ...' : 'تثبيت المشترك'}
+                                            </button>
+                                        </div>
+                                    </form>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleOpenCycleAddForm(cyc)}
+                                        style={{
+                                            background: 'rgba(255,122,0,0.12)',
+                                            border: '1px solid var(--orange-primary)',
+                                            color: 'var(--orange-primary)',
+                                            borderRadius: '10px',
+                                            padding: '7px',
+                                            fontSize: '11px',
+                                            fontWeight: '900',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '5px'
+                                        }}
+                                    >
+                                        <UserPlus size={14} />
+                                        <span>+ إضافة مشترك جديد لهذه الدورة (بدون خصم تكلفة الباقة)</span>
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
             <div className="tz-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
                 {/* عنوان الصفحة والهيدر */}
@@ -289,7 +529,7 @@ export default function AlfaGift({
                             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                                 {serviceMode === 'direct_gift'
                                     ? 'إرسال باقة كاملة لمشتري واحد (كاش أو دين)'
-                                    : 'توزيع الباقة على حتى 3 مشتركين وربطها بالخط'}
+                                    : 'توزيع الباقة على 1 إلى 3 مشتركين مع حفظ الدورة لإكمال البقية لاحقاً'}
                             </span>
                         </div>
                     </div>
@@ -675,7 +915,7 @@ export default function AlfaGift({
                                 border: '1px solid var(--border-color)'
                             }}>
                                 <span style={{ color: 'var(--text-muted)' }}>
-                                    الخصم من الشريحة: <b>${deductUSD.toFixed(2)}</b>
+                                    الخصم من المصدر: <b>${deductUSD.toFixed(2)}</b>
                                 </span>
                                 <span style={{ color: directProfitUSD >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: '900' }}>
                                     الربح الصافي: {directProfitUSD >= 0 ? `+$${directProfitUSD.toFixed(2)}` : `-$${Math.abs(directProfitUSD).toFixed(2)}`}
@@ -699,6 +939,10 @@ export default function AlfaGift({
                                     الموزع: {allocatedGB} / {maxGB} GB
                                 </span>
                             )}
+                        </div>
+
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-card-sub)', padding: '6px 10px', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
+                            * إذا أضفت مشتركاً واحداً أو اثنين الآن، تبقى الدورة مفتوحة في الأعلى لإضافة البقية لاحقاً بدون خصم تكلفة الباقة مرة ثانية.
                         </div>
 
                         {giftRecipients.map((rec, idx) => (
@@ -825,10 +1069,10 @@ export default function AlfaGift({
                                 border: '1px solid var(--border-color)'
                             }}>
                                 <span style={{ color: 'var(--text-muted)' }}>
-                                    إجمالي المبيعات: <b>${ushareTotalSaleUSD.toFixed(2)}</b>
+                                    إجمالي المبيعات المسجلة: <b>${ushareTotalSaleUSD.toFixed(2)}</b>
                                 </span>
                                 <span style={{ color: 'var(--green)', fontWeight: '900' }}>
-                                    صافي الربح: +${Math.max(0, ushareTotalSaleUSD - deductUSD).toFixed(2)}
+                                    صافي الربح التقديري: +${Math.max(0, ushareTotalSaleUSD - deductUSD).toFixed(2)}
                                 </span>
                             </div>
                         )}

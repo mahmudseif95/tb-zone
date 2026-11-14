@@ -26,8 +26,8 @@ export default function Debts({
   onUpdateSourceBalance,
   onRefreshData
 }) {
-  const [activeCategory, setActiveCategory] = useState('all'); // 'all' | 'customers' | 'merchants' | 'boxes'
-  const [activeModal, setActiveModal] = useState(null); // 'add' | 'edit' | 'partial' | 'history'
+  const [activeCategory, setActiveCategory] = useState('all');
+  const [activeModal, setActiveModal] = useState(null);
   const [editingDebt, setEditingDebt] = useState(null);
   const [selectedDebtForHistory, setSelectedDebtForHistory] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,10 +40,6 @@ export default function Debts({
   const [notes, setNotes] = useState('');
   const [sourceWalletId, setSourceWalletId] = useState('');
   const [partialPayment, setPartialPayment] = useState('');
-
-  const saveToStorage = (updated) => {
-    if (onUpdateDebts) onUpdateDebts(updated);
-  };
 
   const handleOpenAdd = () => {
     setName(activeCategory === 'boxes' ? (sources[0]?.name || '') : '');
@@ -78,7 +74,6 @@ export default function Debts({
     setActiveModal('history');
   };
 
-  // إضافة أو تعديل ذمة مباشرة في MySQL
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name.trim() || !amount || isSubmitting) return;
@@ -134,7 +129,6 @@ export default function Debts({
     }
   };
 
-  // سداد دفعة جزئية مع الحفاظ على عملة الدين والصندوق حصراً
   const handleApplyPartial = async (e) => {
     e.preventDefault();
     const paidVal = parseFloat(partialPayment) || 0;
@@ -162,7 +156,6 @@ export default function Debts({
     }
   };
 
-  // تسديد كامل الذمة أو إعادة فتحها
   const handleTogglePaid = async (debt) => {
     if (isSubmitting) return;
     const isNowPaid = !debt.paid;
@@ -190,27 +183,21 @@ export default function Debts({
         setIsSubmitting(false);
       }
     } else {
-      const payEntry = {
-        id: `pay_${Date.now()}`,
-        date: new Date().toISOString(),
-        type: 'reopen',
-        amount: debt.amount,
-        currency: debt.currency,
-        remainingAfter: debt.amount,
-        notes: 'إعادة فتح الدين'
-      };
-
-      const updated = debts.map(d => d.id === debt.id ? {
-        ...d,
-        paid: false,
-        history: [...(d.history || []), payEntry]
-      } : d);
-
-      saveToStorage(updated);
+      if (!window.confirm('هل تريد إعادة فتح هذه الذمة في قاعدة البيانات؟')) return;
+      try {
+        setIsSubmitting(true);
+        await api.updateDebt(debt.id, { paid: false });
+        if (onRefreshData) {
+          await onRefreshData();
+        }
+      } catch (err) {
+        alert('فشل إعادة فتح الذمة: ' + (err.message || ''));
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
-  // حذف سجل الدين نهائياً من قاعدة البيانات
   const handleDelete = async (id) => {
     if (!window.confirm('هل تريد حذف هذا السجل نهائياً من قاعدة البيانات؟')) return;
 
@@ -245,7 +232,6 @@ export default function Debts({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', direction: 'rtl' }}>
 
-      {/* التبويب الشامل والتبويبات الفردية */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         <button
           type="button"
@@ -332,7 +318,6 @@ export default function Debts({
         </div>
       </div>
 
-      {/* بطاقة العنوان والمجموع مفصولة بالعملة */}
       <div className="tz-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -362,7 +347,6 @@ export default function Debts({
         </button>
       </div>
 
-      {/* قائمة الديون */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {currentDebtsList.length === 0 ? (
           <div className="tz-card" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
@@ -490,7 +474,6 @@ export default function Debts({
         )}
       </div>
 
-      {/* المودال المركزي لإضافة وتعديل الذمة */}
       {(activeModal === 'add' || activeModal === 'edit') && createPortal(
         <div className="modal-overlay">
           <div className="modal-center" style={{ maxWidth: '380px' }}>
@@ -619,7 +602,6 @@ export default function Debts({
         document.body
       )}
 
-      {/* مودال دفع دفعة جزئية */}
       {activeModal === 'partial' && editingDebt && createPortal(
         <div className="modal-overlay">
           <div className="modal-center" style={{ maxWidth: '360px' }}>
@@ -676,7 +658,6 @@ export default function Debts({
         document.body
       )}
 
-      {/* مودال كشف الحساب المتسلسل */}
       {activeModal === 'history' && selectedDebtForHistory && createPortal(
         <div className="modal-overlay">
           <div className="modal-center" style={{ maxWidth: '390px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>

@@ -28,35 +28,38 @@ router.get('/bootstrap', async (req, res) => {
         );
         const shop = shopRows[0] || {};
 
+        // المحافظ والصناديق
         const [sourcesRows] = await pool.query(
             'SELECT * FROM sources WHERE shop_id = ? ORDER BY created_at ASC',
             [shopId]
         );
         const [ledgerRows] = await pool.query(
-            'SELECT * FROM source_ledger WHERE shop_id = ? ORDER BY date DESC LIMIT 200',
+            'SELECT * FROM source_ledger WHERE shop_id = ? ORDER BY date DESC LIMIT 300',
             [shopId]
         );
 
         const sources = sourcesRows.map(s => ({
             id: s.id,
             name: s.name,
-            balanceUSD: parseFloat(s.balance_usd),
-            balanceLBP: parseFloat(s.balance_lbp),
-            balance: parseFloat(s.balance_usd),
+            balanceUSD: parseFloat(s.balance_usd) || 0,
+            balanceLBP: parseFloat(s.balance_lbp) || 0,
+            balance: parseFloat(s.balance_usd) || 0,
             ledger: ledgerRows
                 .filter(l => l.source_id === s.id)
                 .map(l => ({
                     id: l.id,
                     type: l.type,
                     itemName: l.item_name,
-                    amount: parseFloat(l.amount),
+                    cycleId: l.cycle_id || null,
+                    amount: parseFloat(l.amount) || 0,
                     currency: l.currency,
-                    balanceAfterUSD: parseFloat(l.balance_after_usd),
-                    balanceAfterLBP: parseFloat(l.balance_after_lbp),
+                    balanceAfterUSD: parseFloat(l.balance_after_usd) || 0,
+                    balanceAfterLBP: parseFloat(l.balance_after_lbp) || 0,
                     date: l.date
                 }))
         }));
 
+        // شرائح الرصيد ودفعاتها
         const [simsRows] = await pool.query(
             'SELECT * FROM sims WHERE shop_id = ? ORDER BY created_at ASC',
             [shopId]
@@ -71,21 +74,22 @@ router.get('/bootstrap', async (req, res) => {
             operator: sim.operator,
             name: sim.name,
             number: sim.phone_number,
-            balance: parseFloat(sim.balance),
+            balance: parseFloat(sim.balance) || 0,
             batches: batchesRows
                 .filter(b => b.sim_id === sim.id)
                 .map(b => ({
                     id: b.id,
                     label: b.label,
-                    cycleId: b.cycle_id,
-                    amountUSD: parseFloat(b.amount_usd),
-                    remainingUSD: parseFloat(b.remaining_usd),
-                    costPrice: parseFloat(b.cost_price),
+                    cycleId: b.cycle_id || null,
+                    amountUSD: parseFloat(b.amount_usd) || 0,
+                    remainingUSD: parseFloat(b.remaining_usd) || 0,
+                    costPrice: parseFloat(b.cost_price) || 0,
                     costCurrency: b.cost_currency,
                     date: b.created_at
                 }))
         }));
 
+        // الخطوط المسكرة والمفتوحة
         const [linesRows] = await pool.query(
             'SELECT * FROM locked_lines WHERE shop_id = ? ORDER BY slot_number ASC',
             [shopId]
@@ -98,8 +102,8 @@ router.get('/bootstrap', async (req, res) => {
             number: l.phone_number,
             validityDays: l.validity_days ?? 30,
             validityStartDate: formatDateOnly(l.validity_start_date),
-            balanceUSD: parseFloat(l.balance_usd).toString(),
-            balance: parseFloat(l.balance_usd),
+            balanceUSD: (parseFloat(l.balance_usd) || 0).toString(),
+            balance: parseFloat(l.balance_usd) || 0,
             hasService: Boolean(l.has_service),
             serviceActive: Boolean(l.service_active),
             serviceStartDate: formatDateOnly(l.service_start_date),
@@ -112,9 +116,33 @@ router.get('/bootstrap', async (req, res) => {
             user1: l.user1 || '',
             user2: l.user2 || '',
             user3: l.user3 || '',
-            notes: l.notes || ''
+            notes: l.notes || '',
+            cycleId: l.cycle_id || null
         }));
 
+        // دورات الخدمة المفتوحة والمكتملة (لإكمال إضافة المشتركين على الشريحة أو الخط بأي وقت)
+        const [cyclesRows] = await pool.query(
+            'SELECT * FROM service_cycles WHERE shop_id = ? ORDER BY created_at DESC LIMIT 100',
+            [shopId]
+        );
+        const serviceCycles = cyclesRows.map(c => ({
+            id: c.id,
+            sourceType: c.source_type || 'sim',
+            simId: c.sim_id || null,
+            batchId: c.batch_id || null,
+            lockedLineId: c.locked_line_id || null,
+            packageName: c.package_name,
+            totalGB: parseFloat(c.total_gb) || 0,
+            allocatedGB: parseFloat(c.allocated_gb) || 0,
+            costUSD: parseFloat(c.cost_usd) || 0,
+            status: c.status || 'open',
+            user1: c.user1_name ? { name: c.user1_name, phone: c.user1_phone || '', gb: parseFloat(c.user1_gb) || 0 } : null,
+            user2: c.user2_name ? { name: c.user2_name, phone: c.user2_phone || '', gb: parseFloat(c.user2_gb) || 0 } : null,
+            user3: c.user3_name ? { name: c.user3_name, phone: c.user3_phone || '', gb: parseFloat(c.user3_gb) || 0 } : null,
+            createdAt: c.created_at
+        }));
+
+        // الديون وكشوفات السداد
         const [debtsRows] = await pool.query(
             'SELECT * FROM debts WHERE shop_id = ? ORDER BY created_at DESC',
             [shopId]
@@ -129,15 +157,15 @@ router.get('/bootstrap', async (req, res) => {
             category: d.category,
             name: d.name,
             phone: d.phone,
-            amount: parseFloat(d.amount),
-            originalAmount: parseFloat(d.original_amount),
+            amount: parseFloat(d.amount) || 0,
+            originalAmount: parseFloat(d.original_amount) || 0,
             currency: d.currency,
             dueDate: formatDateOnly(d.due_date),
             paid: Boolean(d.paid),
             sourceWalletId: d.source_wallet_id,
             targetSimId: d.target_sim_id,
             targetLineId: d.target_line_id,
-            cycleId: d.cycle_id,
+            cycleId: d.cycle_id || null,
             notes: d.notes,
             createdAt: d.created_at,
             history: debtHistoryRows
@@ -145,7 +173,7 @@ router.get('/bootstrap', async (req, res) => {
                 .map(h => ({
                     id: h.id,
                     type: h.type,
-                    amount: parseFloat(h.amount),
+                    amount: parseFloat(h.amount) || 0,
                     currency: h.currency,
                     remainingAfter: h.remaining_after !== null && h.remaining_after !== undefined ? parseFloat(h.remaining_after) : undefined,
                     notes: h.notes,
@@ -153,6 +181,7 @@ router.get('/bootstrap', async (req, res) => {
                 }))
         }));
 
+        // الزبائن
         const [customersRows] = await pool.query(
             'SELECT * FROM customers WHERE shop_id = ? ORDER BY name ASC',
             [shopId]
@@ -164,37 +193,52 @@ router.get('/bootstrap', async (req, res) => {
             address: c.address
         }));
 
+        // سجل العمليات الشامل (مبيعات، شراء كروت، تفعيل خدمات، صرافة، حركات صناديق)
         const [salesRows] = await pool.query(
-            'SELECT * FROM sales_history WHERE shop_id = ? ORDER BY date DESC LIMIT 200',
+            'SELECT * FROM sales_history WHERE shop_id = ? ORDER BY date DESC LIMIT 400',
             [shopId]
         );
-        const salesHistory = salesRows.map(s => ({
-            id: s.id,
-            type: s.type,
-            operator: s.operator,
-            title: s.title,
-            itemName: s.item_name,
-            sellingPrice: parseFloat(s.selling_price),
-            currency: s.currency,
-            costUSD: parseFloat(s.cost_usd),
-            profitUSD: parseFloat(s.profit_usd),
-            customerName: s.customer_name,
-            customerPhone: s.customer_phone,
-            isDebt: Boolean(s.is_debt),
-            paymentType: s.payment_type,
-            notes: s.notes,
-            cycleId: s.cycle_id,
-            date: s.date
-        }));
+        const salesHistory = salesRows.map(s => {
+            let parsedMeta = null;
+            if (s.meta_json) {
+                try {
+                    parsedMeta = JSON.parse(s.meta_json);
+                } catch (e) {
+                    parsedMeta = null;
+                }
+            }
+            return {
+                id: s.id,
+                type: s.type,
+                operator: s.operator,
+                title: s.title,
+                itemName: s.item_name,
+                sellingPrice: parseFloat(s.selling_price) || 0,
+                currency: s.currency || 'USD',
+                costUSD: parseFloat(s.cost_usd) || 0,
+                profitUSD: parseFloat(s.profit_usd) || 0,
+                customerName: s.customer_name,
+                customerPhone: s.customer_phone,
+                isDebt: Boolean(s.is_debt),
+                paymentType: s.payment_type,
+                notes: s.notes || '',
+                explanation: s.explanation || '',
+                cycleId: s.cycle_id || null,
+                parentOpId: s.parent_op_id || null,
+                meta: parsedMeta,
+                date: s.date
+            };
+        });
 
+        // المصاريف
         const [expensesRows] = await pool.query(
-            'SELECT * FROM expenses WHERE shop_id = ? ORDER BY date DESC LIMIT 100',
+            'SELECT * FROM expenses WHERE shop_id = ? ORDER BY date DESC LIMIT 150',
             [shopId]
         );
         const expenses = expensesRows.map(e => ({
             id: e.id,
             title: e.title,
-            amount: parseFloat(e.amount),
+            amount: parseFloat(e.amount) || 0,
             currency: e.currency,
             sourceWalletId: e.source_wallet_id,
             notes: e.notes,
@@ -212,6 +256,7 @@ router.get('/bootstrap', async (req, res) => {
             sources,
             sims,
             lines,
+            serviceCycles,
             debts,
             customers,
             salesHistory,
@@ -308,8 +353,8 @@ router.post('/import-local', async (req, res) => {
         if (Array.isArray(lines)) {
             for (const l of lines) {
                 await connection.query(
-                    `INSERT INTO locked_lines (id, shop_id, line_type, slot_number, phone_number, validity_days, validity_start_date, balance_usd, has_service, service_active, service_start_date, service_days, admin_name, admin_phone, admin_address, admin_gb, admin_price, user1, user2, user3, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `INSERT INTO locked_lines (id, shop_id, line_type, slot_number, phone_number, validity_days, validity_start_date, balance_usd, has_service, service_active, service_start_date, service_days, admin_name, admin_phone, admin_address, admin_gb, admin_price, user1, user2, user3, notes, cycle_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE balance_usd = VALUES(balance_usd), user1 = VALUES(user1), user2 = VALUES(user2), user3 = VALUES(user3)`,
                     [
                         l.id, shopId, l.type || 'locked', l.slotNumber || 1, l.phoneNumber || l.number || '',
@@ -317,7 +362,7 @@ router.post('/import-local', async (req, res) => {
                         parseFloat(l.balanceUSD || l.balance || 0), l.hasService ? 1 : 0, (l.serviceActive ?? l.hasService) ? 1 : 0,
                         formatDateOnly(l.serviceStartDate) || null, l.serviceDays || 30,
                         l.adminName || '', l.adminPhone || '', l.adminAddress || '', l.adminGB || '22', l.adminPrice || '',
-                        l.user1 || '', l.user2 || '', l.user3 || '', l.notes || ''
+                        l.user1 || '', l.user2 || '', l.user3 || '', l.notes || '', l.cycleId || null
                     ]
                 );
             }
@@ -364,14 +409,14 @@ router.post('/import-local', async (req, res) => {
         if (Array.isArray(salesHistory)) {
             for (const s of salesHistory) {
                 await connection.query(
-                    `INSERT INTO sales_history (id, shop_id, type, operator, title, item_name, selling_price, currency, cost_usd, profit_usd, customer_name, customer_phone, is_debt, payment_type, notes, cycle_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `INSERT INTO sales_history (id, shop_id, type, operator, title, item_name, selling_price, currency, cost_usd, profit_usd, customer_name, customer_phone, is_debt, payment_type, notes, explanation, cycle_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE selling_price = VALUES(selling_price)`,
                     [
                         s.id, shopId, s.type || 'sale', s.operator || null, s.title || '', s.itemName || s.title || '',
                         s.sellingPrice || 0, s.currency || 'USD', s.costUSD || 0, s.profitUSD || 0,
                         s.customerName || 'عام', s.customerPhone || '', s.isDebt ? 1 : 0, s.paymentType || 'cash',
-                        s.notes || '', s.cycleId || null
+                        s.notes || '', s.explanation || '', s.cycleId || null
                     ]
                 );
             }

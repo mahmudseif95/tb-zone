@@ -7,7 +7,8 @@ import {
     User,
     Building2,
     Search,
-    RefreshCw
+    RefreshCw,
+    AlertTriangle
 } from 'lucide-react';
 
 const CUSTOM_CARD_TIERS = {
@@ -32,11 +33,26 @@ const CUSTOM_CARD_TIERS = {
     ]
 };
 
+// حساب أيام الصلاحية المتبقية فعلياً على الخط
+const getLineRemainingDays = (line) => {
+    if (!line) return 0;
+    const total = parseInt(line.validityDays || 0, 10);
+    if (!line.validityStartDate) return total;
+    const start = new Date(line.validityStartDate);
+    if (isNaN(start.getTime())) return total;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    start.setHours(0, 0, 0, 0);
+    const elapsed = Math.max(0, Math.floor((today - start) / (1000 * 60 * 60 * 24)));
+    return Math.max(0, total - elapsed);
+};
+
 export default function WalletTxModal({
     wallet,
     sources = [],
     customers = [],
     lines = [],
+    sims = [],
     exchangeRate = 89500,
     onRecordWalletTx,
     onRefreshData,
@@ -65,8 +81,9 @@ export default function WalletTxModal({
         cardCostUSD: defaultTier.costUSD.toString(),
         cardCostLBP: defaultTier.costLBP.toString(),
         cardPayCurrency: 'USD',
-        cardDestination: 'locked', // 'locked' | 'open_admin' | 'direct'
+        cardDestination: 'locked', // 'locked' | 'open_admin' | 'sim' | 'direct'
         targetClosedLineId: '',
+        targetSimId: '',
         lineSearchQuery: '',
         isLineSearchOpen: false,
 
@@ -96,6 +113,7 @@ export default function WalletTxModal({
 
     const lockedLinesOnly = lines.filter(l => (l.type || 'locked') === 'locked');
     const openLinesOnly = lines.filter(l => l.type === 'open');
+    const operatorSims = sims.filter(s => (s.operator || '').toLowerCase() === txForm.cardOperator.toLowerCase());
 
     const filteredClosedLines = lockedLinesOnly.filter(line => {
         const q = (txForm.lineSearchQuery || '').toLowerCase().trim();
@@ -107,6 +125,21 @@ export default function WalletTxModal({
 
     const selectedClosedLineObj = lines.find(l => l.id === txForm.targetClosedLineId);
     const selectedOpenLineObj = lines.find(l => l.id === txForm.targetOpenLineId);
+
+    // حساب فائض الأيام عن سقف الـ 365 يوماً للخط المختار
+    const activeCardTiers = CUSTOM_CARD_TIERS[txForm.cardOperator] || CUSTOM_CARD_TIERS.ALFA;
+    const selectedTierObj = activeCardTiers.find(t => t.id === txForm.selectedTierId) || activeCardTiers[5];
+    const targetValidityLine =
+        txForm.cardDestination === 'locked'
+            ? selectedClosedLineObj
+            : (txForm.cardDestination === 'open_admin' && txForm.adminSelectMode === 'existing_line'
+                ? selectedOpenLineObj
+                : null);
+
+    const currentLineDays = targetValidityLine ? getLineRemainingDays(targetValidityLine) : 0;
+    const projectedTotalDays = currentLineDays + (selectedTierObj?.days || 0);
+    const wastedValidityDays = targetValidityLine && projectedTotalDays > 365 ? projectedTotalDays - 365 : 0;
+    const maxAllowedDaysToAdd = Math.max(0, 365 - currentLineDays);
 
     const handleCardTierChange = (tierId, operator) => {
         const tiers = CUSTOM_CARD_TIERS[operator] || CUSTOM_CARD_TIERS.ALFA;
@@ -215,10 +248,9 @@ export default function WalletTxModal({
             return;
         }
 
-        // 3. شراء كارت
+        // 3. شراء كارت موحد مع فحص سقف الـ 365 يوماً
         if (txForm.type === 'buy_card') {
-            const activeTiers = CUSTOM_CARD_TIERS[txForm.cardOperator] || CUSTOM_CARD_TIERS.ALFA;
-            const currentTier = activeTiers.find(t => t.id === txForm.selectedTierId) || activeTiers[5];
+            const currentTier = selectedTierObj;
 
             const finalCostUSD = parseFloat(txForm.cardCostUSD) || currentTier.costUSD;
             const finalCostLBP = parseFloat(txForm.cardCostLBP) || currentTier.costLBP;
@@ -232,151 +264,73 @@ export default function WalletTxModal({
                 return alert(`رصيد الليرة في المحفظة غير كافٍ! المطلوب: ${finalCostLBP.toLocaleString()} ل.ل، المتوفر: ${Math.round(curLBP).toLocaleString()} ل.ل`);
             }
 
+            if (txForm.cardDestination === 'locked' && !selectedClosedLineObj) {
+                return alert('يرجى تحديد الخط المسكر المستهدف للشحن!');
+            }
+            if (txForm.cardDestination === 'open_admin') {
+                if (txForm.adminSelectMode === 'new' && !txForm.adminName.trim()) {
+                    return alert('يرجى إدخال اسم الأدمن المسؤول عن الخط المفتوح!');
+                }
+                if (txForm.adminSelectMode === 'existing_line' && !selectedOpenLineObj) {
+                    return alert('يرجى اختيار خط الأدمن القائم للشحن!');
+                }
+            }
+            if (txForm.cardDestination === 'sim' && !txForm.targetSimId) {
+                return alert('يرجى اختيار الشريحة الأساسية المستهدفة للشحن!');
+            }
+            if (txForm.cardDestination === 'direct' && !txForm.directPhone.trim()) {
+                return alert('يرجى إدخال رقم الهاتف المراد شحن الكارت له مباشرة!');
+            }
+
+            // تنبيه صارم إذا تجاوز مجموع أيام الصلاحية سقف الـ 365 يوماً
+            if (wastedValidityDays > 0) {
+                const proceed = window.confirm(
+                    `⚠️ تنبيه سقف الصلاحية (365 يوم)!\n\n` +
+                    `هذا الخط يملك حالياً (${currentLineDays} يوم) صلاحية، وإضافة كارت (${currentTier.days} يوم) ستجعل المجموع (${projectedTotalDays} يوم).\n` +
+                    `بما أن الحد الأقصى للصلاحية هو 365 يوماً فقط، سيضيع عليك (${wastedValidityDays} يوم) على الفاضي!\n\n` +
+                    `• اضغط (Cancel / إلغاء) لاختيار خط آخر أو فئة كارت أصغر.\n` +
+                    `• اضغط (OK / موافق) للمتابعة وتثبيت الصلاحية على 365 يوماً.`
+                );
+                if (!proceed) return;
+            }
+
             const creditToAdd = currentTier.credit;
             const daysToAdd = currentTier.days;
 
             try {
                 setIsSubmitting(true);
+                await api.buyCard({
+                    walletId: wallet.id,
+                    operator: txForm.cardOperator,
+                    credit: creditToAdd,
+                    days: daysToAdd,
+                    deductAmount,
+                    payCurrency: txForm.cardPayCurrency,
+                    destination: txForm.cardDestination,
+                    targetLineId:
+                        txForm.cardDestination === 'locked'
+                            ? selectedClosedLineObj.id
+                            : (txForm.cardDestination === 'open_admin' && txForm.adminSelectMode === 'existing_line'
+                                ? selectedOpenLineObj.id
+                                : null),
+                    targetSimId: txForm.cardDestination === 'sim' ? txForm.targetSimId : null,
+                    adminSelectMode: txForm.adminSelectMode,
+                    adminName: txForm.adminName,
+                    adminPhone: txForm.adminPhone,
+                    adminAddress: txForm.adminAddress,
+                    adminGB: txForm.adminGB,
+                    adminPrice: txForm.adminPrice,
+                    adminLinePhone: txForm.adminLinePhone,
+                    directPhone: txForm.directPhone,
+                    directCustomerName: txForm.directCustomerName,
+                    directSellingPrice: parseFloat(txForm.directSellingPrice) || 0,
+                    directSellingCurrency: txForm.directSellingCurrency,
+                    exchangeRate
+                });
 
-                if (txForm.cardDestination === 'locked') {
-                    if (!selectedClosedLineObj) return alert('يرجى تحديد الخط المسكر المستهدف للشحن!');
-
-                    const currentBal = parseFloat(selectedClosedLineObj.balanceUSD || selectedClosedLineObj.balance || 0);
-                    const newBal = parseFloat((currentBal + creditToAdd).toFixed(2));
-                    const currentValidity = parseInt(selectedClosedLineObj.validityDays || 0, 10);
-
-                    await api.updateLine(selectedClosedLineObj.id, {
-                        balanceUSD: newBal,
-                        validityDays: currentValidity + daysToAdd,
-                        validityStartDate: new Date().toISOString().split('T')[0]
-                    });
-
-                    await api.addDebt({
-                        category: 'boxes',
-                        name: wallet.name,
-                        amount: deductAmount,
-                        currency: txForm.cardPayCurrency,
-                        sourceWalletId: wallet.id,
-                        targetLineId: selectedClosedLineObj.id,
-                        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                        notes: `تكلفة كارت ${txForm.cardOperator} (${creditToAdd}$) لخط #${selectedClosedLineObj.slotNumber}`
-                    });
-
-                    if (onRefreshData) await onRefreshData();
-                    alert('تمت العملية بنجاح وتسجيل الرصيد بالخط ودين الصندوق بالمحفظة!');
-                    onClose();
-                    return;
-                }
-
-                if (txForm.cardDestination === 'open_admin') {
-                    if (txForm.adminSelectMode === 'new') {
-                        if (!txForm.adminName.trim()) return alert('يرجى إدخال اسم الأدمن المسؤول عن الخط المفتوح!');
-
-                        const nextSlot = openLinesOnly.length > 0
-                            ? Math.max(...openLinesOnly.map(l => Number(l.slotNumber) || 0)) + 1
-                            : 1;
-                        const linePhone = (txForm.adminLinePhone || txForm.adminPhone || '').trim();
-
-                        const createdLine = await api.addLine({
-                            type: 'open',
-                            slotNumber: nextSlot,
-                            phoneNumber: linePhone,
-                            validityDays: daysToAdd,
-                            validityStartDate: new Date().toISOString().split('T')[0],
-                            balanceUSD: creditToAdd,
-                            hasService: true,
-                            serviceActive: true,
-                            serviceStartDate: new Date().toISOString().split('T')[0],
-                            serviceDays: 30,
-                            adminName: txForm.adminName.trim(),
-                            adminPhone: txForm.adminPhone.trim(),
-                            adminAddress: txForm.adminAddress.trim(),
-                            adminGB: txForm.adminGB || '22',
-                            adminPrice: txForm.adminPrice || ''
-                        });
-
-                        await api.addDebt({
-                            category: 'boxes',
-                            name: wallet.name,
-                            amount: deductAmount,
-                            currency: txForm.cardPayCurrency,
-                            sourceWalletId: wallet.id,
-                            targetLineId: createdLine.id || null,
-                            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                            notes: `تكلفة كارت ${txForm.cardOperator} (${creditToAdd}$) لخط أدمن #${nextSlot} (${txForm.adminName.trim()})`
-                        });
-
-                        if (onRefreshData) await onRefreshData();
-                        alert(`تم إنشاء خط أدمن مفتوح جديد #${nextSlot} (${txForm.adminName}) وتسجيل رصيد الكارت ودين المحفظة بنجاح!`);
-                        onClose();
-                        return;
-                    } else {
-                        if (!selectedOpenLineObj) return alert('يرجى اختيار خط الأدمن القائم للشحن!');
-
-                        const curBal = parseFloat(selectedOpenLineObj.balanceUSD || selectedOpenLineObj.balance || 0);
-                        const curValidity = parseInt(selectedOpenLineObj.validityDays || 0, 10);
-
-                        await api.updateLine(selectedOpenLineObj.id, {
-                            balanceUSD: parseFloat((curBal + creditToAdd).toFixed(2)),
-                            validityDays: curValidity + daysToAdd,
-                            validityStartDate: new Date().toISOString().split('T')[0]
-                        });
-
-                        await api.addDebt({
-                            category: 'boxes',
-                            name: wallet.name,
-                            amount: deductAmount,
-                            currency: txForm.cardPayCurrency,
-                            sourceWalletId: wallet.id,
-                            targetLineId: selectedOpenLineObj.id,
-                            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                            notes: `تكلفة كارت ${txForm.cardOperator} (${creditToAdd}$) لخط أدمن #${selectedOpenLineObj.slotNumber}`
-                        });
-
-                        if (onRefreshData) await onRefreshData();
-                        alert(`تم شحن خط الأدمن #${selectedOpenLineObj.slotNumber} وتسجيل دين الصندوق بنجاح!`);
-                        onClose();
-                        return;
-                    }
-                }
-
-                if (txForm.cardDestination === 'direct') {
-                    if (!txForm.directPhone.trim()) return alert('يرجى إدخال رقم الهاتف المراد شحن الكارت له مباشرة!');
-
-                    const rawSell = parseFloat(txForm.directSellingPrice) || 0;
-                    const costInUSD = isPayLBP ? (finalCostLBP / exchangeRate) : finalCostUSD;
-                    const sellPriceUSD = txForm.directSellingCurrency === 'LBP' ? (rawSell / exchangeRate) : rawSell;
-                    const profitVal = rawSell > 0 ? Math.max(0, sellPriceUSD - costInUSD) : 0;
-
-                    await api.recordWalletTx(wallet.id, {
-                        type: 'withdrawal',
-                        amount: deductAmount,
-                        currency: txForm.cardPayCurrency,
-                        itemName: `شراء كارت مباشر ${txForm.cardOperator} (${creditToAdd}$) للرقم ${txForm.directPhone}`,
-                        customerName: txForm.directCustomerName.trim() || 'رقم مباشر',
-                        notes: `شحن مباشر للرقم ${txForm.directPhone}`
-                    });
-
-                    if (rawSell > 0) {
-                        await api.recordWalletTx(wallet.id, {
-                            type: 'sale',
-                            amount: rawSell,
-                            sellingPrice: rawSell,
-                            currency: txForm.directSellingCurrency,
-                            costUSD: 0,
-                            profitUSD: parseFloat(profitVal.toFixed(2)),
-                            itemName: `مبيع كارت ${txForm.cardOperator} (${creditToAdd}$) للرقم ${txForm.directPhone}`,
-                            customerName: txForm.directCustomerName.trim() || 'زبون كارت مباشر',
-                            customerPhone: txForm.directPhone.trim(),
-                            paymentType: 'cash'
-                        });
-                    }
-
-                    if (onRefreshData) await onRefreshData();
-                    alert(`تم شحن الكارت للرقم ${txForm.directPhone} بنجاح وتسجيل المعاملة!`);
-                    onClose();
-                    return;
-                }
+                if (onRefreshData) await onRefreshData();
+                alert(`تم شراء وتوجيه كارت ${txForm.cardOperator} ($${creditToAdd}) بنجاح وتسجيل العملية في السجل العام!`);
+                onClose();
             } catch (err) {
                 alert('حدث خطأ أثناء تنفيذ شراء الكارت: ' + err.message);
             } finally {
@@ -942,7 +896,7 @@ export default function WalletTxModal({
                                             }}
                                             onClick={() => {
                                                 const defTierId = op === 'ALFA' ? 'alfa_22_73' : 'touch_22_73';
-                                                setTxForm(prev => ({ ...prev, cardOperator: op }));
+                                                setTxForm(prev => ({ ...prev, cardOperator: op, targetSimId: '' }));
                                                 handleCardTierChange(defTierId, op);
                                             }}
                                         >
@@ -1033,7 +987,7 @@ export default function WalletTxModal({
                                 <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>
                                     وجهة الكارت المشحون:
                                 </label>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                                     <button
                                         type="button"
                                         className="tz-input"
@@ -1041,7 +995,7 @@ export default function WalletTxModal({
                                             cursor: 'pointer',
                                             fontSize: '11px',
                                             fontWeight: 'bold',
-                                            padding: '0 4px',
+                                            padding: '0 6px',
                                             borderColor: txForm.cardDestination === 'locked' ? 'var(--orange-primary)' : 'var(--border-color)',
                                             background: txForm.cardDestination === 'locked' ? 'var(--orange-subtle)' : 'transparent',
                                             color: txForm.cardDestination === 'locked' ? 'var(--orange-primary)' : 'inherit'
@@ -1057,7 +1011,7 @@ export default function WalletTxModal({
                                             cursor: 'pointer',
                                             fontSize: '11px',
                                             fontWeight: 'bold',
-                                            padding: '0 4px',
+                                            padding: '0 6px',
                                             borderColor: txForm.cardDestination === 'open_admin' ? 'var(--orange-primary)' : 'var(--border-color)',
                                             background: txForm.cardDestination === 'open_admin' ? 'var(--orange-subtle)' : 'transparent',
                                             color: txForm.cardDestination === 'open_admin' ? 'var(--orange-primary)' : 'inherit'
@@ -1073,7 +1027,23 @@ export default function WalletTxModal({
                                             cursor: 'pointer',
                                             fontSize: '11px',
                                             fontWeight: 'bold',
-                                            padding: '0 4px',
+                                            padding: '0 6px',
+                                            borderColor: txForm.cardDestination === 'sim' ? 'var(--orange-primary)' : 'var(--border-color)',
+                                            background: txForm.cardDestination === 'sim' ? 'var(--orange-subtle)' : 'transparent',
+                                            color: txForm.cardDestination === 'sim' ? 'var(--orange-primary)' : 'inherit'
+                                        }}
+                                        onClick={() => setTxForm(prev => ({ ...prev, cardDestination: 'sim' }))}
+                                    >
+                                        📱 شريحة أساسية (SIM)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="tz-input"
+                                        style={{
+                                            cursor: 'pointer',
+                                            fontSize: '11px',
+                                            fontWeight: 'bold',
+                                            padding: '0 6px',
                                             borderColor: txForm.cardDestination === 'direct' ? 'var(--orange-primary)' : 'var(--border-color)',
                                             background: txForm.cardDestination === 'direct' ? 'var(--orange-subtle)' : 'transparent',
                                             color: txForm.cardDestination === 'direct' ? 'var(--orange-primary)' : 'inherit'
@@ -1104,9 +1074,9 @@ export default function WalletTxModal({
                                             cursor: 'pointer'
                                         }}
                                     >
-                                        <span style={{ fontSize: '13px', fontWeight: selectedClosedLineObj ? 'bold' : 'normal', color: selectedClosedLineObj ? 'var(--orange-primary)' : 'var(--text-muted)' }}>
+                                        <span style={{ fontSize: '12px', fontWeight: selectedClosedLineObj ? 'bold' : 'normal', color: selectedClosedLineObj ? 'var(--orange-primary)' : 'var(--text-muted)' }}>
                                             {selectedClosedLineObj
-                                                ? `خط #${selectedClosedLineObj.slotNumber}: ${selectedClosedLineObj.phoneNumber || selectedClosedLineObj.number} (رصيده: $${selectedClosedLineObj.balanceUSD || selectedClosedLineObj.balance || 0})`
+                                                ? `خط #${selectedClosedLineObj.slotNumber}: ${selectedClosedLineObj.phoneNumber || selectedClosedLineObj.number} (رصيده: $${selectedClosedLineObj.balanceUSD || selectedClosedLineObj.balance || 0} • صلاحية: ${getLineRemainingDays(selectedClosedLineObj)} يوم)`
                                                 : '-- ابحث أو اختر الخط المسكر --'}
                                         </span>
                                     </div>
@@ -1148,32 +1118,35 @@ export default function WalletTxModal({
                                                         لا يوجد خط مسكر مطابق للبحث
                                                     </div>
                                                 ) : (
-                                                    filteredClosedLines.map((line) => (
-                                                        <div
-                                                            key={line.id}
-                                                            onClick={() => setTxForm(prev => ({
-                                                                ...prev,
-                                                                targetClosedLineId: line.id,
-                                                                isLineSearchOpen: false,
-                                                                lineSearchQuery: ''
-                                                            }))}
-                                                            style={{
-                                                                padding: '8px 10px',
-                                                                borderRadius: '8px',
-                                                                background: txForm.targetClosedLineId === line.id ? 'var(--orange-glow)' : 'var(--bg-card-sub)',
-                                                                color: txForm.targetClosedLineId === line.id ? '#fff' : 'var(--text-main)',
-                                                                cursor: 'pointer',
-                                                                display: 'flex',
-                                                                justifyContent: 'space-between',
-                                                                alignItems: 'center',
-                                                                fontSize: '12px',
-                                                                fontWeight: 'bold'
-                                                            }}
-                                                        >
-                                                            <span>خط #{line.slotNumber}</span>
-                                                            <span style={{ direction: 'ltr' }}>{line.phoneNumber || line.number}</span>
-                                                        </div>
-                                                    ))
+                                                    filteredClosedLines.map((line) => {
+                                                        const remD = getLineRemainingDays(line);
+                                                        return (
+                                                            <div
+                                                                key={line.id}
+                                                                onClick={() => setTxForm(prev => ({
+                                                                    ...prev,
+                                                                    targetClosedLineId: line.id,
+                                                                    isLineSearchOpen: false,
+                                                                    lineSearchQuery: ''
+                                                                }))}
+                                                                style={{
+                                                                    padding: '8px 10px',
+                                                                    borderRadius: '8px',
+                                                                    background: txForm.targetClosedLineId === line.id ? 'var(--orange-glow)' : 'var(--bg-card-sub)',
+                                                                    color: txForm.targetClosedLineId === line.id ? '#fff' : 'var(--text-main)',
+                                                                    cursor: 'pointer',
+                                                                    display: 'flex',
+                                                                    justifyContent: 'space-between',
+                                                                    alignItems: 'center',
+                                                                    fontSize: '11px',
+                                                                    fontWeight: 'bold'
+                                                                }}
+                                                            >
+                                                                <span>خط #{line.slotNumber} ({remD} يوم)</span>
+                                                                <span style={{ direction: 'ltr' }}>{line.phoneNumber || line.number}</span>
+                                                            </div>
+                                                        );
+                                                    })
                                                 )}
                                             </div>
                                         </div>
@@ -1299,12 +1272,60 @@ export default function WalletTxModal({
                                                 <option value="">-- اختر خط الأدمن --</option>
                                                 {openLinesOnly.map(l => (
                                                     <option key={l.id} value={l.id}>
-                                                        أدمن #{l.slotNumber}: {l.adminName || l.user1 || 'الرئيسي'} ({l.phoneNumber || l.number})
+                                                        أدمن #{l.slotNumber}: {l.adminName || l.user1 || 'الرئيسي'} ({l.phoneNumber || l.number}) — صلاحية: {getLineRemainingDays(l)} يوم
                                                     </option>
                                                 ))}
                                             </select>
                                         </div>
                                     )}
+                                </div>
+                            )}
+
+                            {/* بطاقة تنبيه سقف الـ 365 يوماً */}
+                            {wastedValidityDays > 0 && (
+                                <div style={{
+                                    background: 'rgba(239, 68, 68, 0.14)',
+                                    border: '1.5px solid var(--red)',
+                                    borderRadius: '12px',
+                                    padding: '10px 12px',
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '8px',
+                                    fontSize: '11px',
+                                    color: 'var(--red)',
+                                    lineHeight: '1.5'
+                                }}>
+                                    <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                                    <div>
+                                        <div style={{ fontWeight: '900', marginBottom: '2px' }}>
+                                            تنبيه: هذا الخط مقفول على سقف 365 يوم!
+                                        </div>
+                                        <div>
+                                            الخط يملك حالياً <b>{currentLineDays} يوم</b> صلاحية (الحد الأقصى للإضافة هو <b>{maxAllowedDaysToAdd} يوم</b> فقط).
+                                            إضافة كارت <b>{selectedTierObj?.days} يوم</b> ستُضيّع عليك <b>{wastedValidityDays} يوم</b> صلاحية على الفاضي!
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {txForm.cardDestination === 'sim' && (
+                                <div style={{ background: 'var(--bg-card)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                                        اختر الشريحة الأساسية ({txForm.cardOperator}):
+                                    </label>
+                                    <select
+                                        className="tz-select"
+                                        style={{ height: '38px', fontSize: '12px', fontWeight: 'bold' }}
+                                        value={txForm.targetSimId}
+                                        onChange={e => setTxForm(prev => ({ ...prev, targetSimId: e.target.value }))}
+                                    >
+                                        <option value="">-- اختر الشريحة --</option>
+                                        {operatorSims.map(s => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.name} {s.number ? `(${s.number})` : ''} — رصيدها: ${parseFloat(s.balance || 0).toFixed(2)}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </div>
                             )}
 
