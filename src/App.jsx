@@ -360,9 +360,11 @@ export default function App() {
       await api.updateLine(id, updatedLine);
       await loadDataFromServer();
       showNotification('تم تحديث بيانات الخط بنجاح');
+      return true;
     } catch (err) {
       console.error('Update line error:', err);
       showNotification('خطأ في تحديث الخط بالسيرفر', err.message);
+      return false; // يستخدمها المستدعي لإيقاف العمليات التالية (مثل تسجيل البيع) عند فشل مزامنة Alfa
     }
   };
 
@@ -429,6 +431,7 @@ export default function App() {
         deductUSD: 0,
         lockedLineId: targetLineId,
         totalGB: saleItem.gb || 0,
+        alfaSynced: saleItem.alfaSynced === true,
         recipients: [
           {
             itemName: saleItem.itemName,
@@ -1022,6 +1025,7 @@ export default function App() {
             onUpdateLine={handleUpdateLine}
             onDeleteLine={handleDeleteLine}
             onRecordSaleFromLine={handleRecordSaleFromLine}
+            onRefreshLines={loadDataFromServer}
             exchangeRate={exchangeRate}
           />
         )}

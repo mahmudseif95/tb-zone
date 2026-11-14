@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
+const { loadLine, runSync } = require('../services/alfaLineSync');
+const { encryptPassword } = require('../services/alfaCrypto');
 
 router.use(authMiddleware);
 
@@ -1181,9 +1183,14 @@ router.post('/line', async (req, res) => {
     const lineId = `line_${Date.now()}`;
 
     try {
+        // بيانات Alfa الاختيارية: للخطوط المسكرة فقط وعند توفر الاسم وكلمة السر معاً
+        const alfaUser = typeof l.alfaUsername === 'string' ? l.alfaUsername.trim().slice(0, 120) : '';
+        const alfaPass = typeof l.alfaPassword === 'string' ? l.alfaPassword : '';
+        const linkAlfa = (l.type || 'locked') === 'locked' && alfaUser && alfaPass;
+
         await pool.query(
-            `INSERT INTO locked_lines (id, shop_id, line_type, slot_number, phone_number, validity_days, validity_start_date, balance_usd, has_service, service_active, service_start_date, service_days, admin_name, admin_phone, admin_address, admin_gb, admin_price, user1, user2, user3, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO locked_lines (id, shop_id, line_type, slot_number, phone_number, validity_days, validity_start_date, balance_usd, has_service, service_active, service_start_date, service_days, admin_name, admin_phone, admin_address, admin_gb, admin_price, user1, user2, user3, notes, alfa_username, alfa_password_enc, alfa_sync_enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 lineId,
                 shopId,
@@ -1205,7 +1212,10 @@ router.post('/line', async (req, res) => {
                 l.user1 || '',
                 l.user2 || '',
                 l.user3 || '',
-                l.notes || ''
+                l.notes || '',
+                linkAlfa ? alfaUser : null,
+                linkAlfa ? encryptPassword(alfaPass) : null,
+                linkAlfa ? 1 : 0
             ]
         );
         res.status(201).json({ success: true, id: lineId });
@@ -1221,6 +1231,31 @@ router.put('/line/:id', async (req, res) => {
     const l = req.body;
 
     try {
+        // مزامنة Alfa Self-Care أولاً: عند الفشل نوقف العملية دون تعديل MySQL
+        const sync = l.alfaSync;
+        if (sync && l.skipAlfaSync !== true) {
+            const data = await loadLine(shopId, lineId);
+            if (!data) return res.status(404).json({ message: 'الخط غير موجود' });
+            if (data.line.alfa_sync_enabled && (data.line.line_type || 'locked') === 'locked') {
+                if (!['add', 'edit', 'remove'].includes(sync.action)) {
+                    return res.status(400).json({ message: 'إجراء مزامنة غير صالح' });
+                }
+                try {
+                    await runSync(shopId, lineId, data.creds, {
+                        action: sync.action,
+                        targetPhone: sync.phone,
+                        oldPhone: sync.oldPhone,
+                        quotaGB: sync.quotaGB
+                    });
+                } catch (alfaErr) {
+                    return res.status(alfaErr.code === 'BAD_INPUT' ? 400 : 502).json({
+                        message: alfaErr.message || 'فشلت المزامنة مع Alfa',
+                        code: alfaErr.code || 'ALFA_ERROR'
+                    });
+                }
+            }
+        }
+
         await pool.query(
             `UPDATE locked_lines SET
        line_type = COALESCE(?, line_type),
@@ -1601,6 +1636,9 @@ router.post('/alfa-gift-sale', async (req, res) => {
                 explanation += `قُبض ${paidNowVal.toLocaleString()} ${recCurrency} من "${rec.name}": ذهب $${debtSettlement.costInUSD.toFixed(2)} لاسترداد رأس مال الكارت للمحفظة (المتبقي لاسترداد رأس المال: $${debtSettlement.remainingBoxDebtUSD.toFixed(2)})، وصافي الربح: +$${netProfitUSD.toFixed(2)}.`;
             } else {
                 explanation += `حصة "${rec.name}" (${rec.gb} GB) بمبلغ ${saleVal.toLocaleString()} ${recCurrency} — صافي الربح: +$${netProfitUSD.toFixed(2)}.`;
+            }
+            if (req.body.alfaSynced === true) {
+                explanation += ' ✅ تمت مزامنة المشترك مع موقع Alfa Self-Care تلقائياً.';
             }
 
             const meta = {

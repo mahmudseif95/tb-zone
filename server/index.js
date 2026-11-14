@@ -16,6 +16,7 @@ app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/operations', operationsRoutes); // تفعيل المسار
+app.use('/api/alfa-sync', require('./routes/alfaSync'));
 
 app.get('/api/health', (req, res) => {
     res.json({ status: 'active', message: 'Telecom OS Backend is running smoothly 🚀' });

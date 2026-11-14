@@ -117,7 +117,12 @@ router.get('/bootstrap', async (req, res) => {
             user2: l.user2 || '',
             user3: l.user3 || '',
             notes: l.notes || '',
-            cycleId: l.cycle_id || null
+            cycleId: l.cycle_id || null,
+            // مزامنة Alfa: لا نُرجع كلمة المرور (مشفّرة أو غير مشفّرة) أبداً
+            hasAlfaAccount: Boolean(l.alfa_username && l.alfa_password_enc),
+            alfaSyncEnabled: Boolean(l.alfa_sync_enabled),
+            alfaSessionStatus: l.alfa_session_status || 'unlinked',
+            alfaLastSyncAt: l.alfa_last_sync_at || null
         }));
 
         // دورات الخدمة المفتوحة والمكتملة (لإكمال إضافة المشتركين على الشريحة أو الخط بأي وقت)

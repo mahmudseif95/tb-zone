@@ -607,3 +607,6 @@ button:active,
   background: var(--bg-input) !important;
   color: var(--text-main) !important;
 }
+/* مؤشر تحميل عام */
+@keyframes tzSpin { to { transform: rotate(360deg); } }
+.spin { animation: tzSpin 0.9s linear infinite; }

@@ -66,6 +66,12 @@ export const api = {
     updateLine: (id, fields) => request(`/operations/line/${id}`, { method: 'PUT', body: JSON.stringify(fields) }),
     deleteLine: (id) => request(`/operations/line/${id}`, { method: 'DELETE' }),
 
+    // 5.1 مزامنة Alfa Self-Care (الخطوط المسكرة فقط)
+    saveAlfaCredentials: (lineId, payload) => request(`/alfa-sync/credentials/${lineId}`, { method: 'POST', body: JSON.stringify(payload) }),
+    connectAlfaSession: (lineId, interactive = false) => request(`/alfa-sync/connect/${lineId}`, { method: 'POST', body: JSON.stringify({ interactive }) }),
+    getAlfaLiveStatus: (lineId) => request(`/alfa-sync/status/${lineId}`),
+    alfaSyncNow: (lineId, payload) => request(`/alfa-sync/sync-now/${lineId}`, { method: 'POST', body: JSON.stringify(payload) }),
+
     // 6. Alfa Gift & U-Share والدورات المفتوحة
     executeAlfaGiftSale: (giftPayload) => request('/operations/alfa-gift-sale', { method: 'POST', body: JSON.stringify(giftPayload) }),
     addCycleUser: (cycleUserPayload) => request('/operations/cycle-add-user', { method: 'POST', body: JSON.stringify(cycleUserPayload) }),

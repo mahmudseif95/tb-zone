@@ -7,9 +7,12 @@ import {
     Trash2,
     Zap,
     Edit3,
-    UserCheck
+    UserCheck,
+    Eye,
+    EyeOff
 } from 'lucide-react';
 import LineUserSaleModal from './LineUserSaleModal';
+import AlfaSyncPanel, { AlfaSubscriberBar } from './AlfaSyncPanel';
 
 export default function LineDetailsModal({
     mode, // 'add' | 'details'
@@ -22,6 +25,7 @@ export default function LineDetailsModal({
     onUpdateLine,
     onDeleteLine,
     onRecordSaleFromLine,
+    onRefreshLines,
     onClose
 }) {
     const [formData, setFormData] = useState(() => {
@@ -61,12 +65,21 @@ export default function LineDetailsModal({
             user1: '',
             user2: '',
             user3: '',
-            notes: ''
+            notes: '',
+            alfaUsername: '',
+            alfaPassword: ''
         };
     });
+    const [showAlfaPassword, setShowAlfaPassword] = useState(false);
 
     const [saleSlotTarget, setSaleSlotTarget] = useState(null); // 1 | 2 | 3 | 'admin'
     const [editingUserInfo, setEditingUserInfo] = useState(null);
+    const [alfaBusy, setAlfaBusy] = useState(false);
+    const [alfaError, setAlfaError] = useState(null);
+    // المزامنة التلقائية مع Alfa: الخطوط المسكرة المرتبطة فقط، ومفعّلة افتراضياً عند الربط
+    const isAlfaLinked = Boolean(mode === 'details' && line && formData.type === 'locked' && line.hasAlfaAccount && line.alfaSyncEnabled);
+    const [alfaAutoSync, setAlfaAutoSync] = useState(true);
+    const alfaSyncOn = isAlfaLinked && alfaAutoSync;
 
     const openEditUserModal = (slotKey) => {
         const rawText = formData[slotKey];
@@ -81,35 +94,71 @@ export default function LineDetailsModal({
             slotKey,
             name: namePart,
             phone: customerObj?.phone || '',
-            gb: gbPart
+            gb: gbPart,
+            originalGb: gbPart
         });
+        setAlfaError(null);
     };
 
-    const handleSaveEditedUser = (e) => {
+    // تعديل مشترك: إن تغيّرت الحصة والمزامنة مفعّلة → تُنفَّذ على Alfa أولاً ثم يُحفظ في MySQL
+    const handleSaveEditedUser = async (e) => {
         e.preventDefault();
-        if (!editingUserInfo) return;
+        if (!editingUserInfo || alfaBusy) return;
 
         const updatedText = `${editingUserInfo.name.trim()} (${editingUserInfo.gb} GB)`;
         const slotKey = editingUserInfo.slotKey;
+        const quotaChanged = String(editingUserInfo.gb) !== String(editingUserInfo.originalGb);
+        const willSyncAlfa = Boolean(alfaSyncOn && quotaChanged);
 
-        setFormData(prev => ({ ...prev, [slotKey]: updatedText }));
-        if (line && onUpdateLine) {
-            onUpdateLine(line.id, (prev) => ({
-                ...prev,
-                [slotKey]: updatedText
-            }));
+        if (willSyncAlfa && !editingUserInfo.phone.trim()) {
+            setAlfaError('رقم هاتف المشترك مطلوب لتعديل الحصة على Alfa');
+            return;
         }
+
+        if (line && onUpdateLine) {
+            setAlfaBusy(true);
+            setAlfaError(null);
+            const ok = await onUpdateLine(line.id, (prev) => ({
+                ...prev,
+                [slotKey]: updatedText,
+                ...(willSyncAlfa ? { alfaSync: { action: 'edit', phone: editingUserInfo.phone.trim(), oldPhone: editingUserInfo.phone.trim(), quotaGB: editingUserInfo.gb } } : {}),
+                skipAlfaSync: !willSyncAlfa
+            }));
+            setAlfaBusy(false);
+            if (ok === false) {
+                setAlfaError('فشل التعديل أو المزامنة مع Alfa — لم يتم حفظ أي تغيير.');
+                return;
+            }
+        }
+        setFormData(prev => ({ ...prev, [slotKey]: updatedText }));
         setEditingUserInfo(null);
     };
 
-    const handleClearUserSlot = (slotKey) => {
-        setFormData(prev => ({ ...prev, [slotKey]: '' }));
-        if (line && onUpdateLine) {
-            onUpdateLine(line.id, (prev) => ({
-                ...prev,
-                [slotKey]: ''
-            }));
+    // حذف مشترك: يُحذف من Alfa أولاً (إن كانت المزامنة مفعّلة) ثم من MySQL
+    const handleClearUserSlot = async (slotKey) => {
+        if (alfaBusy) return;
+        if (alfaSyncOn && !(editingUserInfo?.phone || '').trim()) {
+            setAlfaError('رقم هاتف المشترك مطلوب لحذفه من Alfa');
+            return;
         }
+
+        if (line && onUpdateLine) {
+            setAlfaBusy(true);
+            setAlfaError(null);
+            const phone = (editingUserInfo?.phone || '').trim();
+            const ok = await onUpdateLine(line.id, (prev) => ({
+                ...prev,
+                [slotKey]: '',
+                ...(alfaSyncOn ? { alfaSync: { action: 'remove', phone, oldPhone: phone } } : {}),
+                skipAlfaSync: !alfaSyncOn
+            }));
+            setAlfaBusy(false);
+            if (ok === false) {
+                setAlfaError('فشل الحذف أو المزامنة مع Alfa — لم يتم حذف المشترك.');
+                return;
+            }
+        }
+        setFormData(prev => ({ ...prev, [slotKey]: '' }));
         setEditingUserInfo(null);
     };
 
@@ -139,8 +188,14 @@ export default function LineDetailsModal({
                 user1: formData.user1.trim(),
                 user2: formData.user2.trim(),
                 user3: formData.user3.trim(),
-                notes: formData.notes.trim()
+                notes: formData.notes.trim(),
+                ...(formData.type === 'locked' && formData.alfaUsername.trim() && formData.alfaPassword
+                    ? { alfaUsername: formData.alfaUsername.trim(), alfaPassword: formData.alfaPassword }
+                    : {})
             });
+            // لا نُبقي كلمة السر في الذاكرة بعد الحفظ
+            setFormData(prev => ({ ...prev, alfaUsername: '', alfaPassword: '' }));
+            setShowAlfaPassword(false);
         } else if (mode === 'details' && line) {
             onUpdateLine(line.id, (prev) => ({
                 ...prev,
@@ -214,6 +269,44 @@ export default function LineDetailsModal({
                                     <input type="tel" required placeholder="70123456" className="tz-input" style={{ height: '40px' }} value={formData.phoneNumber} onChange={e => setFormData({ ...formData, phoneNumber: e.target.value })} />
                                 </div>
                             </div>
+
+                            {mode === 'add' && formData.type === 'locked' && (
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                    <div>
+                                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>اسم مستخدم Alfa (اختياري)</label>
+                                        <input
+                                            type="text"
+                                            autoComplete="off"
+                                            placeholder="مزامنة تلقائية"
+                                            className="tz-input"
+                                            style={{ height: '40px' }}
+                                            value={formData.alfaUsername}
+                                            onChange={e => setFormData({ ...formData, alfaUsername: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>كلمة سر Alfa (اختياري)</label>
+                                        <div style={{ position: 'relative' }}>
+                                            <input
+                                                type={showAlfaPassword ? 'text' : 'password'}
+                                                autoComplete="new-password"
+                                                className="tz-input"
+                                                style={{ height: '40px', paddingInlineEnd: '34px' }}
+                                                value={formData.alfaPassword}
+                                                onChange={e => setFormData({ ...formData, alfaPassword: e.target.value })}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAlfaPassword(v => !v)}
+                                                aria-label={showAlfaPassword ? 'إخفاء كلمة السر' : 'إظهار كلمة السر'}
+                                                style={{ position: 'absolute', insetInlineEnd: '6px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: '2px' }}
+                                            >
+                                                {showAlfaPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                                 <div>
@@ -352,10 +445,22 @@ export default function LineDetailsModal({
                                 </div>
                             )}
 
+                            {formData.type === 'locked' && (
+                                <AlfaSyncPanel line={mode === 'details' ? line : null} onLinked={onRefreshLines} />
+                            )}
+
                             <div style={{ background: 'var(--bg-card-sub)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                                     <label style={{ fontSize: '11px', fontWeight: 'bold' }}>المستخدمين التابعين للخط (3 كحد أقصى):</label>
                                 </div>
+
+                                {formData.type === 'locked' && mode === 'details' && (
+                                    <AlfaSubscriberBar
+                                        line={line}
+                                        enabled={alfaAutoSync && Boolean(line?.alfaSyncEnabled)}
+                                        onToggle={setAlfaAutoSync}
+                                    />
+                                )}
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                     {[1, 2, 3].map((num) => {
@@ -441,6 +546,7 @@ export default function LineDetailsModal({
                     onUpdateFormData={setFormData}
                     onUpdateLine={onUpdateLine}
                     onRecordSaleFromLine={onRecordSaleFromLine}
+                    alfaSyncOn={alfaSyncOn}
                     onClose={() => setSaleSlotTarget(null)}
                 />
             )}
@@ -485,18 +591,35 @@ export default function LineDetailsModal({
                                 />
                             </div>
 
-                            {editingUserInfo.phone && (
+                            {alfaSyncOn ? (
+                                <div>
+                                    <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>رقم هاتف المشترك (مطلوب للمزامنة مع Alfa):</label>
+                                    <input
+                                        type="tel"
+                                        className="tz-input"
+                                        style={{ height: '38px' }}
+                                        placeholder="70123456"
+                                        value={editingUserInfo.phone}
+                                        onChange={e => setEditingUserInfo({ ...editingUserInfo, phone: e.target.value })}
+                                    />
+                                </div>
+                            ) : editingUserInfo.phone && (
                                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-card-sub)', padding: '6px', borderRadius: '8px' }}>
                                     الهاتف المسجل: <b>{editingUserInfo.phone}</b>
                                 </div>
                             )}
 
+                            {alfaError && (
+                                <div style={{ fontSize: '11px', color: 'var(--red)', fontWeight: 'bold' }}>{alfaError}</div>
+                            )}
+
                             <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                                <button type="submit" className="btn-primary" style={{ flex: 1, height: '38px', fontSize: '12px' }}>
-                                    حفظ التعديل
+                                <button type="submit" disabled={alfaBusy} className="btn-primary" style={{ flex: 1, height: '38px', fontSize: '12px' }}>
+                                    {alfaBusy ? 'جارٍ المزامنة مع Alfa...' : 'حفظ التعديل'}
                                 </button>
                                 <button
                                     type="button"
+                                    disabled={alfaBusy}
                                     onClick={() => handleClearUserSlot(editingUserInfo.slotKey)}
                                     style={{
                                         background: 'rgba(239, 68, 68, 0.15)',

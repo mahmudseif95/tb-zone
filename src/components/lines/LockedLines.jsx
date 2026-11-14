@@ -24,7 +24,8 @@ export default function LockedLines({
     onAddLine,
     onUpdateLine,
     onDeleteLine,
-    onRecordSaleFromLine
+    onRecordSaleFromLine,
+    onRefreshLines
 }) {
     const [activeTab, setActiveTab] = useState('locked'); // 'locked' | 'open'
     const today = new Date();
@@ -359,7 +360,8 @@ export default function LockedLines({
                 <LineDetailsModal
                     mode={activeModal}
                     lineType={activeModal === 'add' ? activeTab : (selectedLine?.type || activeTab)}
-                    line={selectedLine}
+                    line={selectedLine ? (lines.find(l => l.id === selectedLine.id) || selectedLine) : null}
+                    onRefreshLines={onRefreshLines}
                     defaultSlotNumber={nextSlotNumber.toString()}
                     defaultServiceDate={defaultServiceDate}
                     customers={customers}

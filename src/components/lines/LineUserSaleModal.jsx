@@ -10,8 +10,11 @@ export default function LineUserSaleModal({
     onUpdateFormData,
     onUpdateLine,
     onRecordSaleFromLine,
+    alfaSyncOn = false,
     onClose
 }) {
+    const [syncing, setSyncing] = useState(false);
+    const [syncError, setSyncError] = useState(null);
     const isUserAdmin = targetUserSlot === 'admin';
 
     const [userSaleForm, setUserSaleForm] = useState({
@@ -59,9 +62,16 @@ export default function LineUserSaleModal({
 
     const remainingDebtAmount = Math.max(0, parseFloat((rawSaleTotal - paidAmountVal).toFixed(2)));
 
-    const handleConfirmUserSale = (e) => {
+    const handleConfirmUserSale = async (e) => {
         e.preventDefault();
-        if (!userSaleForm.name.trim()) return;
+        if (syncing || !userSaleForm.name.trim()) return;
+
+        // مزامنة Alfa تنطبق على مستخدمي الخط المسكر فقط (وليس الأدمن)
+        const willSyncAlfa = Boolean(alfaSyncOn && !isUserAdmin && line);
+        if (willSyncAlfa && !userSaleForm.phone.trim()) {
+            setSyncError('رقم هاتف المشترك مطلوب للمزامنة مع Alfa');
+            return;
+        }
 
         const userText = `${userSaleForm.name.trim()} (${userSaleForm.gb} GB)`;
 
@@ -87,14 +97,24 @@ export default function LineUserSaleModal({
             }
         } else {
             const slotKey = `user${targetUserSlot}`;
-            onUpdateFormData(prev => ({ ...prev, [slotKey]: userText }));
 
             if (line && onUpdateLine) {
-                onUpdateLine(line.id, (prev) => ({
+                // السيرفر ينفذ المزامنة على Alfa أولاً ولا يكتب MySQL إن فشلت
+                setSyncing(true);
+                setSyncError(null);
+                const ok = await onUpdateLine(line.id, (prev) => ({
                     ...prev,
-                    [slotKey]: userText
+                    [slotKey]: userText,
+                    ...(willSyncAlfa ? { alfaSync: { action: 'add', phone: userSaleForm.phone.trim(), quotaGB: userSaleForm.gb } } : {}),
+                    skipAlfaSync: !willSyncAlfa
                 }));
+                setSyncing(false);
+                if (ok === false) {
+                    setSyncError('فشل حفظ المشترك أو مزامنته مع Alfa — لم يتم تسجيل أي عملية. راجع رسالة الخطأ وأعد المحاولة.');
+                    return; // لا نسجل البيع ولا نغلق النافذة
+                }
             }
+            onUpdateFormData(prev => ({ ...prev, [slotKey]: userText }));
         }
 
         if (onRecordSaleFromLine && rawSaleTotal > 0) {
@@ -117,7 +137,8 @@ export default function LineUserSaleModal({
                 remainingDebt: remainingDebtAmount,
                 isDebt: isPartialOrDebt,
                 targetLineId: line ? line.id : null,
-                lockedLineId: line ? line.id : null
+                lockedLineId: line ? line.id : null,
+                alfaSynced: willSyncAlfa
             });
         }
 
@@ -394,8 +415,17 @@ export default function LineUserSaleModal({
                         )}
                     </div>
 
-                    <button type="submit" className="btn-primary" style={{ marginTop: '4px', height: '42px', fontSize: '13px' }}>
-                        تثبيت الحصة وتسجيل العملية
+                    {alfaSyncOn && !isUserAdmin && (
+                        <div style={{ fontSize: '10px', color: 'var(--orange-primary)', fontWeight: 'bold', background: 'var(--bg-card-sub)', padding: '6px 8px', borderRadius: '8px' }}>
+                            ستتم إضافة هذا الرقم تلقائياً على موقع Alfa (رقم الهاتف مطلوب) قبل تسجيل العملية.
+                        </div>
+                    )}
+                    {syncError && (
+                        <div style={{ fontSize: '11px', color: 'var(--red)', fontWeight: 'bold' }}>{syncError}</div>
+                    )}
+
+                    <button type="submit" disabled={syncing} className="btn-primary" style={{ marginTop: '4px', height: '42px', fontSize: '13px' }}>
+                        {syncing ? 'جارٍ المزامنة مع Alfa...' : 'تثبيت الحصة وتسجيل العملية'}
                     </button>
                 </form>
             </div>

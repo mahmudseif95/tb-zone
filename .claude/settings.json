@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git check-ignore *)",
+      "Bash(awk 'NR>=1417 && NR<=1668 && /sales_history|expl|notes|Text|desc/ {print NR\": \"substr\\($0,1,170\\)}' routes/operations.js)",
+      "Bash(npx playwright *)",
+      "Bash(printf '\\\\n/* مؤشر تحميل عام */\\\\n@keyframes tzSpin { to { transform: rotate\\(360deg\\); } }\\\\n.spin { animation: tzSpin 0.9s linear infinite; }\\\\n')",
+      "Bash(node -e ' *)",
+      "Bash(npx eslint *)",
+      "Bash(npx vite *)",
+      "Bash(node --check server/routes/operations.js)",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./server/services/alfaCrypto'\\)\\)\\)\")",
+      "Bash(timeout 90 node -e \"require\\('playwright'\\).chromium.launch\\(\\).then\\(async b=>{console.log\\('OK',b.version\\(\\)\\);await b.close\\(\\)}\\).catch\\(e=>console.log\\('FAIL',e.message.split\\('\\\\n'\\)[0]\\)\\)\")"
+    ]
+  }
+}
