@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
+const { archiveAndResetExpiredLines } = require('../services/lineCycleService');
 
 router.use(authMiddleware);
 
@@ -22,6 +23,13 @@ router.get('/bootstrap', async (req, res) => {
     const shopId = req.shopId;
 
     try {
+        // فحص كسول (عند كل تحميل) للخطوط التي انتهت دورة خدمتها الشهرية: تُؤرشف وتُصفَّر قبل القراءة
+        try {
+            await archiveAndResetExpiredLines(shopId);
+        } catch (archErr) {
+            console.error('Archive expired lines error:', archErr.message);
+        }
+
         const [shopRows] = await pool.query(
             'SELECT id, name, subtitle, phone, logo, exchange_rate FROM shops WHERE id = ?',
             [shopId]
@@ -113,9 +121,16 @@ router.get('/bootstrap', async (req, res) => {
             adminAddress: l.admin_address || '',
             adminGB: l.admin_gb || '22',
             adminPrice: l.admin_price || '',
+            adminUsedGb: l.admin_used_gb !== null && l.admin_used_gb !== undefined ? parseFloat(l.admin_used_gb) : null,
             user1: l.user1 || '',
             user2: l.user2 || '',
             user3: l.user3 || '',
+            user1Phone: l.user1_phone || '',
+            user2Phone: l.user2_phone || '',
+            user3Phone: l.user3_phone || '',
+            user1UsedGb: l.user1_used_gb !== null && l.user1_used_gb !== undefined ? parseFloat(l.user1_used_gb) : null,
+            user2UsedGb: l.user2_used_gb !== null && l.user2_used_gb !== undefined ? parseFloat(l.user2_used_gb) : null,
+            user3UsedGb: l.user3_used_gb !== null && l.user3_used_gb !== undefined ? parseFloat(l.user3_used_gb) : null,
             notes: l.notes || '',
             cycleId: l.cycle_id || null,
             // مزامنة Alfa: لا نُرجع كلمة المرور (مشفّرة أو غير مشفّرة) أبداً

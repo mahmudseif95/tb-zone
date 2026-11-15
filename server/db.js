@@ -30,7 +30,15 @@ module.exports = pool;
         ['alfa_password_enc', 'TEXT NULL'],
         ['alfa_sync_enabled', 'TINYINT(1) NOT NULL DEFAULT 0'],
         ['alfa_session_status', "VARCHAR(30) NOT NULL DEFAULT 'unlinked'"],
-        ['alfa_last_sync_at', 'DATETIME NULL']
+        ['alfa_last_sync_at', 'DATETIME NULL'],
+        ['user1_phone', 'VARCHAR(30) NULL'],
+        ['user2_phone', 'VARCHAR(30) NULL'],
+        ['user3_phone', 'VARCHAR(30) NULL'],
+        ['user1_used_gb', 'DECIMAL(6,2) NULL'],
+        ['user2_used_gb', 'DECIMAL(6,2) NULL'],
+        ['user3_used_gb', 'DECIMAL(6,2) NULL'],
+        // استهلاك حصة الأدمن (الخط المفتوح) من موقع Alfa — مكافئ لـ userX_used_gb لكن لباقة الأدمن نفسه
+        ['admin_used_gb', 'DECIMAL(6,2) NULL']
     ];
     try {
         const [rows] = await pool.query(
@@ -45,5 +53,29 @@ module.exports = pool;
         }
     } catch (err) {
         console.error('❌ فشل ترقية أعمدة Alfa في locked_lines:', err.message);
+    }
+})();
+
+// أرشيف الدورات: لقطة كاملة عن أي خط (مسكر أو مفتوح) عند انتهاء صلاحيته أو تصفيره يدوياً
+(async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS line_cycles (
+                id VARCHAR(50) PRIMARY KEY,
+                shop_id VARCHAR(50) NOT NULL,
+                line_id VARCHAR(50) NOT NULL,
+                line_type VARCHAR(20) NOT NULL DEFAULT 'locked',
+                line_phone VARCHAR(50) NULL,
+                started_at DATE NULL,
+                expired_at DATETIME NOT NULL,
+                subscribers_json TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_line_cycles_shop_line (shop_id, line_id),
+                FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+                FOREIGN KEY (line_id) REFERENCES locked_lines(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+    } catch (err) {
+        console.error('❌ فشل إنشاء جدول line_cycles:', err.message);
     }
 })();

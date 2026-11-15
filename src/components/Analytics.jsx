@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, Printer } from 'lucide-react';
+import { BarChart, Bar, Cell, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { TrendingUp, Printer, X } from 'lucide-react';
 import DonutChart from './DonutChart';
 import { openPrintableReceipt } from '../utils/receiptPrinter';
 import { formatDateTime } from '../utils/dateFormatter';
@@ -27,6 +27,8 @@ export default function Analytics({
   exchangeRate = 89500
 }) {
   const [period, setPeriod] = useState('weekly');
+  // مفتاح العمود المختار في المخطط (null = عرض الكل)؛ يُصفَّر تلقائياً عند تبديل الفترة
+  const [selectedBarKey, setSelectedBarKey] = useState(null);
 
   const toUSD = (amount, currency) => {
     const val = parseFloat(amount) || 0;
@@ -216,6 +218,41 @@ export default function Analytics({
         ? getMonthlyData()
         : getYearlyData();
 
+  // معرّف ثابت (نصي) لكل عمود — نستخدمه بدل مرجع الكائن لأن chartData يُعاد بناؤه كل تصيير
+  const barKeyOf = (d) => `${period}::${d.dateKey || d.name}`;
+  const selectedBarData = selectedBarKey ? chartData.find(d => barKeyOf(d) === selectedBarKey) : null;
+
+  // هل تنتمي عملية بيع معيّنة إلى العمود المختار؟ (كل فترة لها معيار مطابقة مختلف)
+  const isSaleInSelectedBar = (item) => {
+    if (!selectedBarData) return true;
+    const d = new Date(item.date);
+    if (period === 'daily') {
+      const h = d.getHours();
+      return h >= selectedBarData.minHour && h < selectedBarData.maxHour;
+    }
+    if (period === 'weekly') {
+      return getLocalDateKey(d) === selectedBarData.dateKey;
+    }
+    if (period === 'monthly') {
+      const dayOfMonth = d.getDate();
+      if (selectedBarData.name === 'أسبوع 1') return dayOfMonth <= 7;
+      if (selectedBarData.name === 'أسبوع 2') return dayOfMonth > 7 && dayOfMonth <= 14;
+      if (selectedBarData.name === 'أسبوع 3') return dayOfMonth > 14 && dayOfMonth <= 21;
+      return dayOfMonth > 21;
+    }
+    if (period === 'yearly') {
+      return d.getMonth() === selectedBarData.mIdx;
+    }
+    return true;
+  };
+
+  const displayedSales = filteredSales.filter(isSaleInSelectedBar);
+  const handlePeriodChange = (p) => { setPeriod(p); setSelectedBarKey(null); };
+  const handleBarClick = (data) => {
+    const key = barKeyOf(data);
+    setSelectedBarKey(prev => (prev === key ? null : key));
+  };
+
   const handleExportSummary = () => {
     const periodTitles = {
       daily: 'اليومي',
@@ -307,7 +344,7 @@ export default function Analytics({
             <button
               key={p.id}
               type="button"
-              onClick={() => setPeriod(p.id)}
+              onClick={() => handlePeriodChange(p.id)}
               style={{
                 padding: '8px 4px',
                 borderRadius: '10px',
@@ -394,30 +431,64 @@ export default function Analytics({
                   direction: 'rtl'
                 }}
               />
-              <Bar dataKey="profit" fill="var(--orange-primary)" radius={[6, 6, 0, 0]} />
+              {/* background يرسم مستطيلاً بارتفاع كامل المخطط لكل عمود (حتى بلا قيمة/صفر) ليبقى قابلاً
+                  للضغط دائماً — بدونه، عمود بقيمة صفر لا يُرسم له أي شكل قابل للنقر فعلياً */}
+              <Bar dataKey="profit" radius={[6, 6, 0, 0]} cursor="pointer" onClick={handleBarClick} background={{ fill: 'var(--bg-input)', radius: [6, 6, 0, 0] }}>
+                {chartData.map((entry, i) => (
+                  <Cell
+                    key={i}
+                    fill={
+                      !selectedBarKey
+                        ? 'var(--orange-primary)'
+                        : barKeyOf(entry) === selectedBarKey
+                          ? 'var(--orange-hover)'
+                          : 'var(--border-color)'
+                    }
+                  />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
 
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
             <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--orange-primary)' }}>
-              مبيعات الفترة ({filteredSales.length}):
+              مبيعات الفترة ({displayedSales.length}):
             </span>
-            {cardPurchases.length > 0 && (
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                كروت مشتراة من المحافظ: <b>{cardPurchases.length}</b>
-              </span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {cardPurchases.length > 0 && (
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                  كروت مشتراة من المحافظ: <b>{cardPurchases.length}</b>
+                </span>
+              )}
+              {selectedBarData && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedBarKey(null)}
+                  className="tactile"
+                  style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'var(--orange-subtle)', border: '1px solid var(--orange-primary)', color: 'var(--orange-primary)', borderRadius: '999px', padding: '2px 8px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  <X size={10} />
+                  عرض كل الفترة
+                </button>
+              )}
+            </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '240px', overflowY: 'auto' }}>
-            {filteredSales.length === 0 ? (
+          {selectedBarData && (
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+              مُصفّى حسب: <b style={{ color: 'var(--orange-primary)' }}>{selectedBarData.fullName || selectedBarData.name}</b>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {displayedSales.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '16px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                لا توجد مبيعات مسجلة في هذه الفترة
+                {selectedBarData ? `لا توجد مبيعات مسجلة في ${selectedBarData.fullName || selectedBarData.name}` : 'لا توجد مبيعات مسجلة في هذه الفترة'}
               </div>
             ) : (
-              filteredSales.map((s, idx) => {
+              displayedSales.map((s, idx) => {
                 const rawPrice = parseFloat(s.sellingPrice) || 0;
                 const isLBP = s.currency === 'LBP';
                 const profitVal = s.profitUSD !== undefined ? parseFloat(s.profitUSD) : 0;

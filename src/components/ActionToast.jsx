@@ -1,16 +1,24 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 
+const EXIT_MS = 220;
+
 export default function ActionToast({ message, subMessage, onClose }) {
+  const [leaving, setLeaving] = useState(false);
+
   useEffect(() => {
-    const timer = setTimeout(() => {
-      onClose();
-    }, 2800);
+    const timer = setTimeout(() => setLeaving(true), 2800);
     return () => clearTimeout(timer);
-  }, [onClose]);
+  }, []);
+
+  useEffect(() => {
+    if (!leaving) return undefined;
+    const t = setTimeout(onClose, EXIT_MS);
+    return () => clearTimeout(t);
+  }, [leaving, onClose]);
 
   return (
-    <div 
+    <div
       style={{
         position: 'fixed',
         top: '20px',
@@ -27,7 +35,9 @@ export default function ActionToast({ message, subMessage, onClose }) {
         gap: '12px',
         minWidth: '290px',
         maxWidth: '92%',
-        animation: 'toastDrop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+        animation: leaving
+          ? `toastFadeOut ${EXIT_MS}ms ease-in forwards`
+          : 'toastDrop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards'
       }}
     >
       <div style={{
@@ -58,6 +68,10 @@ export default function ActionToast({ message, subMessage, onClose }) {
         @keyframes toastDrop {
           from { opacity: 0; transform: translate(-50%, -28px) scale(0.9); }
           to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        }
+        @keyframes toastFadeOut {
+          from { opacity: 1; transform: translate(-50%, 0) scale(1); }
+          to { opacity: 0; transform: translate(-50%, -10px) scale(0.96); }
         }
       `}</style>
     </div>

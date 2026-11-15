@@ -16,6 +16,8 @@
   --bg-card-sub: #1C2433;
   --bg-input: #1C2433;
   --border-color: rgba(255, 255, 255, 0.12);
+  --border-color-strong: rgba(255, 255, 255, 0.22);
+  --card-shadow: 0 4px 18px rgba(0, 0, 0, 0.04);
   --text-main: #FFFFFF;
   --text-muted: #94A3B8;
   --brand-text: #FFFFFF;
@@ -35,18 +37,20 @@
   --orange-subtle: rgba(255, 122, 0, 0.08);
   --orange-gradient: linear-gradient(135deg, #FF8800 0%, #FF5500 100%);
 
-  /* Light Theme */
-  --bg-main: #FFF8F3;
+  /* Light Theme: خلفية صفحة رمادية-مزرقة واضحة الاختلاف عن بطاقات بيضاء نقية، بحدود وظلال واضحة */
+  --bg-main: #F1F5F9;
   --bg-card: #FFFFFF;
-  --bg-card-sub: #FFF3EB;
+  --bg-card-sub: #F8FAFC;
   --bg-input: #FFFFFF;
-  --border-color: #FFD8BE;
-  --text-main: #1A0D00;
-  --text-muted: #6B4E3D;
+  --border-color: #E2E8F0;
+  --border-color-strong: #CBD5E1;
+  --card-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --text-main: #0F172A;
+  --text-muted: #64748B;
   --brand-text: #FF7A00;
   --green: #10B981;
   --red: #EF4444;
-  --modal-backdrop: rgba(26, 13, 0, 0.5);
+  --modal-backdrop: rgba(15, 23, 42, 0.45);
 }
 
 * {
@@ -57,15 +61,24 @@
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* قوقعة التطبيق مقفلة على ارتفاع الشاشة فعلياً (بلا سكرول على html/body/#root) — المنطقة الوحيدة
+   التي تتمرَّر هي <main> داخل App.jsx. هذا يلغي كامل فئة أخطاء position:fixed المرتبطة بالتمرير
+   على مستوى الصفحة، ويمنع أي قفزة لشريط التنقل السفلي عند تبديل التبويبات. */
+html,
+body,
+#root {
+  height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+}
+
 body {
   background-color: var(--bg-main);
   color: var(--text-main);
   direction: rtl;
-  min-height: 100dvh;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  overflow-x: hidden;
   transition: background-color 0.25s ease, color 0.25s ease;
 }
 
@@ -82,7 +95,6 @@ body.modal-open {
   max-width: 440px;
   margin: 0 auto;
   position: relative;
-  min-height: 100dvh;
 }
 
 /* ========================================================
@@ -113,6 +125,13 @@ button,
 button:active,
 .btn-action-full:active {
   transform: scale(0.94) !important;
+}
+
+/* توهج/رفع لطيف عند التمرير فوق أي زر غير معطَّل (لا يُطبَّق على اللمس حتى لا يلتصق التوهج) */
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):hover {
+    filter: brightness(1.05);
+  }
 }
 
 .brand-logo-animated {
@@ -146,7 +165,7 @@ button:active,
   border: 1.5px solid var(--border-color);
   border-radius: 20px;
   padding: 16px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--card-shadow);
   margin-bottom: 12px;
 }
 
@@ -252,12 +271,16 @@ button:active,
    5. شريط التنقل السفلي والـ Scrollbar
 ======================================================== */
 .bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 440px;
+  /* !important مقصودة: .bottom-nav يُركَّب عبر Portal مباشرة على document.body، فلا يجوز
+     لأي style مضمَّن أو قاعدة أخرى كسر تثبيته على أسفل ومنتصف الشاشة مرة أخرى */
+  position: fixed !important;
+  top: auto !important;
+  bottom: 0 !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 100% !important;
+  max-width: 440px !important;
+  z-index: 9999 !important;
   height: var(--total-nav-height);
   padding-bottom: var(--safe-bottom);
   display: grid;
@@ -265,7 +288,6 @@ button:active,
   background: var(--bg-card);
   border-top: 1px solid var(--border-color);
   backdrop-filter: blur(16px);
-  z-index: 1000;
 }
 
 .nav-item {
@@ -610,3 +632,274 @@ button:active,
 /* مؤشر تحميل عام */
 @keyframes tzSpin { to { transform: rotate(360deg); } }
 .spin { animation: tzSpin 0.9s linear infinite; }
+
+/* ========================================================
+   7. الحركة واللمسات التفاعلية (Motion & Micro-Interactions)
+   جميع الحركات هنا تعتمد transform/opacity فقط (مسرَّعة بالعتاد)، وتُحترَم تفضيلات
+   تقليل الحركة عبر prefers-reduced-motion في آخر هذا القسم.
+======================================================== */
+
+/* دخول محتوى المودال بأسلوب نابض (spring-like)، بالتوازي مع تلاشي الخلفية modalOverlayIn */
+@keyframes modalContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal-center,
+.modal-sheet {
+  animation: modalContentIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* لمسة الضغط العامة: تُضاف كـclassName إلى أي زر/بطاقة تفاعلية (تُحافظ على كل الأنماط الأخرى) */
+.tactile {
+  transition: transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 150ms ease, filter 150ms ease;
+}
+
+.tactile:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tactile:hover {
+    filter: brightness(1.06);
+  }
+
+  .tactile-lift:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* سهم الأكورديون (شريط Alfa، سجل الدورات، إلخ): عنصر Chevron واحد يدور بدل تبديل الأيقونة */
+.chevron-rotate {
+  display: inline-flex;
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chevron-rotate.is-open {
+  transform: rotate(180deg);
+}
+
+/* طي/فتح الأقسام القابلة للطي بسلاسة (الارتفاع + الشفافية) بدون قياس JS للارتفاع الحقيقي */
+.collapsible-panel {
+  overflow: hidden;
+  transition: max-height 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease, margin-top 280ms ease;
+  max-height: 0;
+  opacity: 0;
+}
+
+.collapsible-panel.is-open {
+  max-height: 2000px;
+  opacity: 1;
+  margin-top: 10px;
+}
+
+/* تموّج لامع خفيف يعبر فوق أشرطة الاستهلاك النشطة (GB) */
+@keyframes shimmerSweep {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.bar-fill {
+  position: relative;
+  overflow: hidden;
+  transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: shimmerSweep 2.2s ease-in-out infinite;
+}
+
+/* نبض تنفّس هادئ لمؤشرات الحالة النشطة (نقطة "نشط") */
+@keyframes statusBreathe {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55);
+    transform: scale(1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(16, 185, 129, 0);
+    transform: scale(1.12);
+  }
+}
+
+.status-dot-active {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: statusBreathe 2.4s ease-in-out infinite;
+}
+
+/* نبض تحذير أسرع وأوضح (انتهاء قريب / حصة منخفضة) */
+@keyframes statusWarnPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
+    transform: scale(1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    transform: scale(1.18);
+  }
+}
+
+.status-dot-warning {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: statusWarnPulse 1.1s ease-in-out infinite;
+}
+
+/* دخول مُدرَّج للبطاقات (استخدمه مع style={{ animationDelay: `${i * 35}ms` }}) */
+@keyframes staggerCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-card {
+  animation: staggerCardIn 320ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* ومضة تسليط خفيفة على قيمة رقمية تغيّرت للتو (رصيد، سعر صرف...) */
+@keyframes valueFlash {
+  0% {
+    background-color: var(--orange-subtle);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+.value-flash {
+  animation: valueFlash 900ms ease-out;
+  border-radius: 6px;
+}
+
+/* نبضة تأكيد عند النسخ/اللصق الناجح (زر "نسخ الرقم" أو "لصق وحفظ من الحافظة") */
+@keyframes confirmPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 var(--confirm-glow, rgba(16, 185, 129, 0.5));
+  }
+
+  40% {
+    transform: scale(1.12);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+}
+
+.confirm-pulse {
+  animation: confirmPulse 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* شريط التنقل السفلي: حبة مؤشر نشط منزلقة + رفع أيقونة التبويب الفعّال */
+.nav-active-pill {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  border-radius: 14px;
+  background: var(--orange-subtle);
+  transition: left 280ms cubic-bezier(0.16, 1, 0.3, 1), width 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 0;
+}
+
+.nav-item {
+  position: relative;
+  z-index: 1;
+}
+
+.nav-item .nav-icon-wrapper {
+  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.nav-item[aria-current="page"] .nav-icon-wrapper {
+  transform: translateY(-2px);
+}
+
+/* يحترم تفضيل تقليل الحركة في نظام المستخدم: نُسكِت كل الحركات المُزخرِفة هنا دون كسر أي منطق */
+@media (prefers-reduced-motion: reduce) {
+
+  .modal-center,
+  .modal-sheet,
+  .stagger-card,
+  .tactile,
+  .tactile:active,
+  .bar-fill::after,
+  .status-dot-active,
+  .status-dot-warning,
+  .confirm-pulse,
+  .value-flash,
+  .nav-icon-wrapper,
+  .chevron-rotate {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ========================================================
+   8. تحسينات النمط الفاتح (Light Mode Polish)
+   حدود واضحة وظلال ناعمة وتباين نظيف بين خلفية الصفحة وسطوح البطاقات البيضاء،
+   بالمستوى الحرفي نفسه المعتمد في النمط الداكن.
+======================================================== */
+[data-theme='light'] .tz-input,
+[data-theme='light'] .tz-select,
+[data-theme='light'] input,
+[data-theme='light'] select,
+[data-theme='light'] textarea {
+  box-shadow: var(--card-shadow);
+}
+
+[data-theme='light'] .modal-center,
+[data-theme='light'] .modal-sheet {
+  border: 1px solid var(--border-color-strong);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme='light'] .bottom-nav {
+  border-top: 1px solid var(--border-color-strong);
+  box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.05);
+}
+
+[data-theme='light'] .app-header {
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+}
+
+[data-theme='light'] .tz-item-card {
+  box-shadow: var(--card-shadow);
+}

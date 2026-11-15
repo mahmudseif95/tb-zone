@@ -468,7 +468,7 @@ export default function AlfaGift({
                                                     onChange={(e) => setCycleUserForm(prev => ({ ...prev, isDebt: e.target.checked }))}
                                                     style={{ accentColor: 'var(--red)' }}
                                                 />
-                                                <span>{cycleUserForm.isDebt ? 'تسجيل كدين على المشترك' : 'مدفوع كاش'}</span>
+                                                <span>{cycleUserForm.isDebt ? 'تسجيل كدين على المشترك' : 'دفع نقدي (كاش)'}</span>
                                             </label>
 
                                             <button
@@ -524,7 +524,7 @@ export default function AlfaGift({
                         </div>
                         <div>
                             <h2 style={{ margin: 0, fontSize: '17px', fontWeight: '900', color: 'var(--orange-primary)' }}>
-                                {serviceMode === 'direct_gift' ? 'ALFA GIFT (مباشر)' : 'U-SHARE (توزيع يوشير)'}
+                                {serviceMode === 'direct_gift' ? 'ALFA GIFT' : 'U-SHARE (توزيع يوشير)'}
                             </h2>
                             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                                 {serviceMode === 'direct_gift'
@@ -844,7 +844,7 @@ export default function AlfaGift({
                                     onChange={(e) => setBuyerIsDebt(e.target.checked)}
                                     style={{ accentColor: 'var(--red)', width: '15px', height: '15px' }}
                                 />
-                                <span>{buyerIsDebt ? 'آجل (دين)' : 'مدفوع كاش'}</span>
+                                <span>{buyerIsDebt ? 'آجل (دين)' : 'دفع نقدي (كاش)'}</span>
                             </label>
                         </div>
 

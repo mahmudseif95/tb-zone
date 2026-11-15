@@ -372,86 +372,86 @@ export default function Debts({
                   borderLeft: debt.paid ? '4px solid var(--green)' : '4px solid var(--red)'
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div
-                      onClick={() => handleOpenHistory(debt)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-                      title="اضغط لعرض كشف الحساب المتسلسل"
-                    >
-                      <span style={{ fontSize: '15px', fontWeight: '900', textDecoration: debt.paid ? 'line-through' : 'none', color: isBoxDebt ? 'var(--orange-primary)' : 'var(--text-main)' }}>
-                        {debt.name}
-                      </span>
-                      <History size={13} color="var(--orange-primary)" />
-                      {debt.paid && (
-                        <span style={{ fontSize: '10px', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--green)', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
-                          تم السداد بالكامل
-                        </span>
-                      )}
-                      {activeCategory === 'all' && (
-                        <span style={{ fontSize: '9px', background: 'var(--bg-card-sub)', color: 'var(--text-muted)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
-                          {debt.category === 'merchants' ? 'تاجر' : isBoxDebt ? 'صندوق' : 'زبون'}
-                        </span>
-                      )}
-                    </div>
+                {/* الصف 1: اسم الزبون + شارة النوع + شارة الحالة (تلتف على سطر إضافي عند الازدحام بدل القص) */}
+                <div
+                  onClick={() => handleOpenHistory(debt)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', flexWrap: 'wrap' }}
+                  title="اضغط لعرض كشف الحساب المتسلسل"
+                >
+                  <span style={{ fontSize: '15px', fontWeight: '900', textDecoration: debt.paid ? 'line-through' : 'none', color: isBoxDebt ? 'var(--orange-primary)' : 'var(--text-main)', overflowWrap: 'anywhere' }}>
+                    {debt.name}
+                  </span>
+                  <History size={13} color="var(--orange-primary)" style={{ flexShrink: 0 }} />
+                  {activeCategory === 'all' && (
+                    <span style={{ fontSize: '9px', whiteSpace: 'nowrap', flexShrink: 0, background: 'var(--bg-card-sub)', color: 'var(--text-muted)', padding: '1px 5px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                      {debt.category === 'merchants' ? 'تاجر' : isBoxDebt ? 'صندوق' : 'زبون'}
+                    </span>
+                  )}
+                  {debt.paid && (
+                    <span style={{ fontSize: '10px', whiteSpace: 'nowrap', flexShrink: 0, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--green)', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
+                      تم السداد بالكامل
+                    </span>
+                  )}
+                </div>
 
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      استحقاق: {debt.dueDate ? debt.dueDate.split('T')[0] : 'غير محدد'} {debt.notes ? `• ${debt.notes}` : ''}
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  استحقاق: {debt.dueDate ? debt.dueDate.split('T')[0] : 'غير محدد'} {debt.notes ? `• ${debt.notes}` : ''}
+                </div>
+
+                {/* الصف 2: المبلغ + أزرار الإجراءات (دفعة / تحديد كمسدد / تعديل / حذف) بتباعد مريح */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: '15px', fontWeight: '900', color: debt.paid ? 'var(--green)' : 'var(--red)', whiteSpace: 'nowrap' }}>
+                      {currentRemAmt.toLocaleString()} {currLabel}
+                    </div>
+                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                      {debt.paid ? 'مسدد' : 'متبقي قائم'}
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ textAlign: 'left' }}>
-                      <div style={{ fontSize: '15px', fontWeight: '900', color: debt.paid ? 'var(--green)' : 'var(--red)' }}>
-                        {currentRemAmt.toLocaleString()} {currLabel}
-                      </div>
-                      <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
-                        {debt.paid ? 'مسدد' : 'متبقي قائم'}
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      {!debt.paid && (
-                        <button
-                          onClick={() => handleOpenPartial(debt)}
-                          style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--orange-primary)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                          title="قبض أو سداد دفعة جزئية"
-                        >
-                          دفعة
-                        </button>
-                      )}
-
+                  <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                    {!debt.paid && (
                       <button
-                        onClick={() => handleTogglePaid(debt)}
-                        style={{
-                          background: debt.paid ? 'var(--green)' : 'var(--bg-card-sub)',
-                          color: debt.paid ? '#fff' : 'var(--text-main)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          padding: '6px',
-                          cursor: 'pointer'
-                        }}
-                        title={debt.paid ? 'إعادة فتح الذمة' : 'تحديد كمسدد كامل'}
+                        onClick={() => handleOpenPartial(debt)}
+                        style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--orange-primary)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                        title="قبض أو سداد دفعة جزئية"
                       >
-                        <CheckCircle2 size={15} />
+                        دفعة
                       </button>
+                    )}
 
-                      <button
-                        onClick={() => handleOpenEdit(debt)}
-                        style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px', cursor: 'pointer' }}
-                        title="تعديل"
-                      >
-                        <Edit3 size={15} />
-                      </button>
+                    <button
+                      onClick={() => handleTogglePaid(debt)}
+                      style={{
+                        background: debt.paid ? 'var(--green)' : 'var(--bg-card-sub)',
+                        color: debt.paid ? '#fff' : 'var(--text-main)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '6px',
+                        display: 'flex',
+                        flexShrink: 0,
+                        cursor: 'pointer'
+                      }}
+                      title={debt.paid ? 'إعادة فتح الذمة' : 'تحديد كمسدد كامل'}
+                    >
+                      <CheckCircle2 size={15} />
+                    </button>
 
-                      <button
-                        onClick={() => handleDelete(debt.id)}
-                        style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--red)', borderRadius: '8px', padding: '6px', cursor: 'pointer' }}
-                        title="حذف"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => handleOpenEdit(debt)}
+                      style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--orange-primary)', borderRadius: '8px', padding: '6px', display: 'flex', flexShrink: 0, cursor: 'pointer' }}
+                      title="تعديل"
+                    >
+                      <Edit3 size={15} />
+                    </button>
+
+                    <button
+                      onClick={() => handleDelete(debt.id)}
+                      style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', color: 'var(--red)', borderRadius: '8px', padding: '6px', display: 'flex', flexShrink: 0, cursor: 'pointer' }}
+                      title="حذف"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
                 </div>
 

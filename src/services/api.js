@@ -39,6 +39,7 @@ export const api = {
     },
 
     logout: () => localStorage.removeItem('zt_token'),
+    getMe: () => request('/auth/me'),
 
     // 2. البيانات العامة وهوية المحل
     fetchBootstrapData: () => request('/data/bootstrap'),
@@ -71,6 +72,11 @@ export const api = {
     connectAlfaSession: (lineId, interactive = false) => request(`/alfa-sync/connect/${lineId}`, { method: 'POST', body: JSON.stringify({ interactive }) }),
     getAlfaLiveStatus: (lineId) => request(`/alfa-sync/status/${lineId}`),
     alfaSyncNow: (lineId, payload) => request(`/alfa-sync/sync-now/${lineId}`, { method: 'POST', body: JSON.stringify(payload) }),
+    parseAlfaUShareText: (lineId, text) => request(`/alfa-sync/parse/${lineId}`, { method: 'POST', body: JSON.stringify({ text }) }),
+
+    // 5.2 سجل الدورات السابقة وتصفير الخط (مسكر أو مفتوح)
+    getLineCycles: (lineId) => request(`/operations/line/${lineId}/cycles`),
+    archiveResetLine: (lineId) => request(`/operations/line/${lineId}/archive-reset`, { method: 'POST' }),
 
     // 6. Alfa Gift & U-Share والدورات المفتوحة
     executeAlfaGiftSale: (giftPayload) => request('/operations/alfa-gift-sale', { method: 'POST', body: JSON.stringify(giftPayload) }),

@@ -1,0 +1,43 @@
+# Dependencies & Package Locks
+node_modules/
+server/node_modules/
+package-lock.json
+server/package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build Outputs & Caches
+dist/
+build/
+.vite/
+.cache/
+coverage/
+android/
+ios/
+
+# Git, Logs & Temp Files
+.git/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Old Alfa Sessions, Batch Scripts & Backups
+.alfa-sessions/
+*.bat
+*.sql
+*.sqlite
+*.db
+*.zip
+*.tar.gz
+
+# Environment & Secrets
+.env
+.env.*
+server/.env
+
+# Media & Large Assets
+public/assets/*.png
+public/assets/*.jpg
+public/assets/*.mp4
+*.pdf

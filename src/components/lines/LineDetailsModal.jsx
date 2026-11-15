@@ -9,10 +9,14 @@ import {
     Edit3,
     UserCheck,
     Eye,
-    EyeOff
+    EyeOff,
+    Tag
 } from 'lucide-react';
+import { parseUserSlot } from '../../utils/whatsappHelper';
+import WhatsAppActivationButton from './WhatsAppActivationButton';
 import LineUserSaleModal from './LineUserSaleModal';
-import AlfaSyncPanel, { AlfaSubscriberBar } from './AlfaSyncPanel';
+import AlfaSyncPanel, { AlfaManualSyncBar, CopyPhoneButton } from './AlfaSyncPanel';
+import LineCyclesPanel from './LineCyclesPanel';
 
 export default function LineDetailsModal({
     mode, // 'add' | 'details'
@@ -26,6 +30,7 @@ export default function LineDetailsModal({
     onDeleteLine,
     onRecordSaleFromLine,
     onRefreshLines,
+    brandConfig,
     onClose
 }) {
     const [formData, setFormData] = useState(() => {
@@ -76,10 +81,9 @@ export default function LineDetailsModal({
     const [editingUserInfo, setEditingUserInfo] = useState(null);
     const [alfaBusy, setAlfaBusy] = useState(false);
     const [alfaError, setAlfaError] = useState(null);
-    // المزامنة التلقائية مع Alfa: الخطوط المسكرة المرتبطة فقط، ومفعّلة افتراضياً عند الربط
-    const isAlfaLinked = Boolean(mode === 'details' && line && formData.type === 'locked' && line.hasAlfaAccount && line.alfaSyncEnabled);
-    const [alfaAutoSync, setAlfaAutoSync] = useState(true);
-    const alfaSyncOn = isAlfaLinked && alfaAutoSync;
+    // المزامنة الآلية المباشرة مع Alfa متوقفة حالياً (بانتظار API رسمي) — راجع server/services/alfaAutomation.js.
+    // الطريقة المعتمدة الآن: "فتح في Alfa" و"لصق من Alfa" (انظر AlfaManualSyncBar أدناه).
+    const alfaSyncOn = false;
 
     const openEditUserModal = (slotKey) => {
         const rawText = formData[slotKey];
@@ -93,7 +97,7 @@ export default function LineDetailsModal({
         setEditingUserInfo({
             slotKey,
             name: namePart,
-            phone: customerObj?.phone || '',
+            phone: line?.[`${slotKey}Phone`] || customerObj?.phone || '',
             gb: gbPart,
             originalGb: gbPart
         });
@@ -121,6 +125,7 @@ export default function LineDetailsModal({
             const ok = await onUpdateLine(line.id, (prev) => ({
                 ...prev,
                 [slotKey]: updatedText,
+                [`${slotKey}Phone`]: editingUserInfo.phone.trim(),
                 ...(willSyncAlfa ? { alfaSync: { action: 'edit', phone: editingUserInfo.phone.trim(), oldPhone: editingUserInfo.phone.trim(), quotaGB: editingUserInfo.gb } } : {}),
                 skipAlfaSync: !willSyncAlfa
             }));
@@ -149,6 +154,7 @@ export default function LineDetailsModal({
             const ok = await onUpdateLine(line.id, (prev) => ({
                 ...prev,
                 [slotKey]: '',
+                [`${slotKey}Phone`]: '',
                 ...(alfaSyncOn ? { alfaSync: { action: 'remove', phone, oldPhone: phone } } : {}),
                 skipAlfaSync: !alfaSyncOn
             }));
@@ -189,7 +195,7 @@ export default function LineDetailsModal({
                 user2: formData.user2.trim(),
                 user3: formData.user3.trim(),
                 notes: formData.notes.trim(),
-                ...(formData.type === 'locked' && formData.alfaUsername.trim() && formData.alfaPassword
+                ...(formData.alfaUsername.trim() && formData.alfaPassword
                     ? { alfaUsername: formData.alfaUsername.trim(), alfaPassword: formData.alfaPassword }
                     : {})
             });
@@ -270,7 +276,7 @@ export default function LineDetailsModal({
                                 </div>
                             </div>
 
-                            {mode === 'add' && formData.type === 'locked' && (
+                            {mode === 'add' && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                                     <div>
                                         <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>اسم مستخدم Alfa (اختياري)</label>
@@ -320,18 +326,18 @@ export default function LineDetailsModal({
                             </div>
 
                             <div style={{ background: 'var(--bg-card-sub)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--orange-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', cursor: 'pointer' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--orange-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                         <Zap size={14} />
                                         <span>تفعيل خدمة 30 يوم</span>
-                                    </label>
+                                    </span>
                                     <input
                                         type="checkbox"
                                         checked={formData.hasService}
                                         onChange={e => setFormData({ ...formData, hasService: e.target.checked })}
-                                        style={{ width: '16px', height: '16px', accentColor: 'var(--orange-primary)' }}
+                                        style={{ width: '16px', height: '16px', margin: 0, flexShrink: 0, accentColor: 'var(--orange-primary)', cursor: 'pointer' }}
                                     />
-                                </div>
+                                </label>
 
                                 {formData.hasService && (
                                     <div>
@@ -442,11 +448,41 @@ export default function LineDetailsModal({
                                             />
                                         </div>
                                     </div>
+
+                                    {mode === 'details' && Number.isFinite(line?.adminUsedGb) && Number.isFinite(parseFloat(formData.adminGB)) && (() => {
+                                        const usedGB = line.adminUsedGb;
+                                        const quotaGB = parseFloat(formData.adminGB);
+                                        const pct = Math.min(100, Math.round((usedGB / quotaGB) * 100));
+                                        return (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                <div style={{ height: '5px', borderRadius: '4px', background: 'var(--bg-card)', overflow: 'hidden' }}>
+                                                    <div className="bar-fill" style={{ height: '100%', width: `${pct}%`, borderRadius: '4px', background: pct >= 90 ? 'var(--red)' : 'var(--orange-primary)' }} />
+                                                </div>
+                                                <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                                                    استهلاك باقة الأدمن: {usedGB} / {quotaGB} GB — المتبقي: {Math.max(0, quotaGB - usedGB).toFixed(2)} GB
+                                                </span>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             )}
 
-                            {formData.type === 'locked' && (
-                                <AlfaSyncPanel line={mode === 'details' ? line : null} onLinked={onRefreshLines} />
+                            <AlfaSyncPanel line={mode === 'details' ? line : null} onLinked={onRefreshLines} />
+
+                            {mode === 'details' && (
+                                <LineCyclesPanel
+                                    line={line}
+                                    onReset={() => {
+                                        // الخط صُفِّر على السيرفر (مشتركون + أدمن + حالة الخدمة): نعكس ذلك فوراً في النافذة
+                                        setFormData(prev => ({
+                                            ...prev,
+                                            user1: '', user2: '', user3: '',
+                                            adminName: '', adminPhone: '', adminAddress: '',
+                                            hasService: false, serviceStartDate: new Date().toISOString().split('T')[0]
+                                        }));
+                                        if (onRefreshLines) onRefreshLines();
+                                    }}
+                                />
                             )}
 
                             <div style={{ background: 'var(--bg-card-sub)', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
@@ -454,11 +490,30 @@ export default function LineDetailsModal({
                                     <label style={{ fontSize: '11px', fontWeight: 'bold' }}>المستخدمين التابعين للخط (3 كحد أقصى):</label>
                                 </div>
 
-                                {formData.type === 'locked' && mode === 'details' && (
-                                    <AlfaSubscriberBar
+                                {mode === 'details' && (
+                                    <AlfaManualSyncBar
                                         line={line}
-                                        enabled={alfaAutoSync && Boolean(line?.alfaSyncEnabled)}
-                                        onToggle={setAlfaAutoSync}
+                                        onFetched={(merge) => {
+                                            // المشتركون + حالة الباقة الرئيسية حُفظوا في MySQL من السيرفر: نحدّث الحقول الظاهرة فوراً دون انتظار إعادة التحميل
+                                            setFormData(prev => {
+                                                const next = { ...prev };
+                                                if (merge?.slots) {
+                                                    const s = merge.slots;
+                                                    next.user1 = s.user1 || '';
+                                                    next.user2 = s.user2 || '';
+                                                    next.user3 = s.user3 || '';
+                                                }
+                                                const mi = merge?.mainInfo;
+                                                if (mi) {
+                                                    if (Number.isFinite(mi.remainingDays)) next.validityDays = mi.remainingDays;
+                                                    if (mi.isActive === true) next.hasService = true;
+                                                    if (Number.isFinite(mi.balanceUSD)) next.balanceUSD = String(mi.balanceUSD);
+                                                    if (mi.adminGb) next.adminGB = mi.adminGb;
+                                                }
+                                                return next;
+                                            });
+                                            if (onRefreshLines) onRefreshLines();
+                                        }}
                                     />
                                 )}
 
@@ -466,28 +521,91 @@ export default function LineDetailsModal({
                                     {[1, 2, 3].map((num) => {
                                         const slotKey = `user${num}`;
                                         const val = formData[slotKey];
+                                        const sub = val ? parseUserSlot(val, customers, line?.[`${slotKey}Phone`]) : null;
+                                        const usedGB = mode === 'details' ? line?.[`${slotKey}UsedGb`] : null;
+                                        const quotaGB = sub?.quotaGB ? parseFloat(sub.quotaGB) : null;
+                                        const hasUsage = usedGB !== null && usedGB !== undefined && quotaGB;
+                                        const pct = hasUsage ? Math.min(100, Math.round((usedGB / quotaGB) * 100)) : 0;
+                                        // مشترك مستورَد من Alfa (لصق/جلب) ولم يُسمَّ باسم زبون فعلي بعد — اسمه مجرد رقمه
+                                        const needsNaming = Boolean(sub && /^\d{6,8}$/.test(sub.name.trim()));
 
                                         return (
                                             <div key={slotKey} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                                 {val ? (
                                                     <div style={{
                                                         flex: 1,
+                                                        minWidth: 0,
                                                         background: 'var(--bg-card)',
                                                         border: '1px solid var(--border-color)',
                                                         borderRadius: '10px',
-                                                        padding: '6px 10px',
+                                                        padding: '8px 10px',
                                                         display: 'flex',
-                                                        justifyContent: 'space-between',
-                                                        alignItems: 'center'
+                                                        flexDirection: 'column',
+                                                        gap: '6px'
                                                     }}>
-                                                        <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{val}</span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => openEditUserModal(slotKey)}
-                                                            style={{ background: 'none', border: 'none', color: 'var(--orange-primary)', cursor: 'pointer', padding: '2px' }}
-                                                        >
-                                                            <Edit3 size={15} />
-                                                        </button>
+                                                        {/* السطر 1: الاسم/الهاتف + حصة GB على اليمين، وأيقونات مضغوطة (تعديل، نسخ الرقم) على اليسار */}
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', minWidth: 0, flex: 1 }}>
+                                                                <span style={{ fontSize: '12px', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                                                                    {sub?.name || val}
+                                                                </span>
+                                                                {sub?.quotaGB && (
+                                                                    <span style={{ fontSize: '10px', fontWeight: '900', color: 'var(--orange-primary)', background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '1px 6px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                                                        {sub.quotaGB} GB
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                                                {sub?.phone && <CopyPhoneButton phone={sub.phone} />}
+                                                                <button
+                                                                    type="button"
+                                                                    title="تعديل المشترك"
+                                                                    onClick={() => openEditUserModal(slotKey)}
+                                                                    style={{ background: 'none', border: 'none', color: 'var(--orange-primary)', cursor: 'pointer', padding: '2px', display: 'flex' }}
+                                                                >
+                                                                    <Edit3 size={15} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        {sub?.phone && (
+                                                            <div dir="ltr" style={{ fontSize: '10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{sub.phone}</div>
+                                                        )}
+
+                                                        {/* السطر 2: أزرار الإجراءات بشكل متوازٍ بدلاً من حشرها بسطر واحد */}
+                                                        <div style={{ display: 'grid', gridTemplateColumns: needsNaming ? '1fr 1fr' : '1fr', gap: '6px' }}>
+                                                            <WhatsAppActivationButton
+                                                                variant="full"
+                                                                label="طريقة التفعيل (1323)"
+                                                                subscriberName={sub?.name}
+                                                                subscriberPhone={sub?.phone}
+                                                                quotaGB={sub?.quotaGB}
+                                                                lockedLineNumber={formData.phoneNumber}
+                                                                shopName={brandConfig?.name}
+                                                            />
+                                                            {needsNaming && (
+                                                                <button
+                                                                    type="button"
+                                                                    title="إدخال اسم الزبون واختيار تسجيل العملية كبيعة"
+                                                                    onClick={() => setSaleSlotTarget(num)}
+                                                                    style={{ background: 'var(--orange-primary)', border: 'none', color: '#fff', borderRadius: '12px', padding: '0 8px', fontSize: '10px', fontWeight: '900', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', height: '44px', width: '100%' }}
+                                                                >
+                                                                    <Tag size={12} />
+                                                                    <span>تسمية وتسجيل بيعة</span>
+                                                                </button>
+                                                            )}
+                                                        </div>
+
+                                                        {hasUsage && (
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                                <div style={{ height: '5px', borderRadius: '4px', background: 'var(--bg-card-sub)', overflow: 'hidden' }}>
+                                                                    <div className="bar-fill" style={{ height: '100%', width: `${pct}%`, borderRadius: '4px', background: pct >= 90 ? 'var(--red)' : 'var(--orange-primary)' }} />
+                                                                </div>
+                                                                <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                                                                    المستهلك: {usedGB} / {quotaGB} GB — المتبقي: {Math.max(0, quotaGB - usedGB).toFixed(2)} GB
+                                                                </span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <button
@@ -547,6 +665,7 @@ export default function LineDetailsModal({
                     onUpdateLine={onUpdateLine}
                     onRecordSaleFromLine={onRecordSaleFromLine}
                     alfaSyncOn={alfaSyncOn}
+                    brandConfig={brandConfig}
                     onClose={() => setSaleSlotTarget(null)}
                 />
             )}
@@ -591,23 +710,17 @@ export default function LineDetailsModal({
                                 />
                             </div>
 
-                            {alfaSyncOn ? (
-                                <div>
-                                    <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>رقم هاتف المشترك (مطلوب للمزامنة مع Alfa):</label>
-                                    <input
-                                        type="tel"
-                                        className="tz-input"
-                                        style={{ height: '38px' }}
-                                        placeholder="70123456"
-                                        value={editingUserInfo.phone}
-                                        onChange={e => setEditingUserInfo({ ...editingUserInfo, phone: e.target.value })}
-                                    />
-                                </div>
-                            ) : editingUserInfo.phone && (
-                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-card-sub)', padding: '6px', borderRadius: '8px' }}>
-                                    الهاتف المسجل: <b>{editingUserInfo.phone}</b>
-                                </div>
-                            )}
+                            <div>
+                                <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>رقم هاتف المشترك (لواتساب التفعيل والمطابقة مع Alfa):</label>
+                                <input
+                                    type="tel"
+                                    className="tz-input"
+                                    style={{ height: '38px' }}
+                                    placeholder="70123456"
+                                    value={editingUserInfo.phone}
+                                    onChange={e => setEditingUserInfo({ ...editingUserInfo, phone: e.target.value })}
+                                />
+                            </div>
 
                             {alfaError && (
                                 <div style={{ fontSize: '11px', color: 'var(--red)', fontWeight: 'bold' }}>{alfaError}</div>

@@ -431,7 +431,11 @@ export default function RechargeHub({
                   onClick={() => setCurrency('LBP')}
                   style={{
                     flex: 1,
-                    padding: '10px',
+                    height: '46px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
                     borderRadius: '10px',
                     border: currency === 'LBP' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
                     background: currency === 'LBP' ? 'rgba(255, 122, 0, 0.2)' : 'var(--bg-input)',
@@ -440,15 +444,18 @@ export default function RechargeHub({
                     fontSize: '12px'
                   }}
                 >
-                  (LBP)
-                  ليرة
+                  (LBP) ليرة
                 </button>
                 <button
                   type="button"
                   onClick={() => setCurrency('USD')}
                   style={{
                     flex: 1,
-                    padding: '10px',
+                    height: '46px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
                     borderRadius: '10px',
                     border: currency === 'USD' ? '2px solid var(--orange-primary)' : '1px solid var(--border-color)',
                     background: currency === 'USD' ? 'rgba(255, 122, 0, 0.2)' : 'var(--bg-input)',
@@ -457,8 +464,7 @@ export default function RechargeHub({
                     fontSize: '12px'
                   }}
                 >
-                  ($)
-                  دولار
+                  ($) دولار
                 </button>
               </div>
             </div>
@@ -577,19 +583,20 @@ export default function RechargeHub({
                             border: '1px solid var(--border-color)',
                             padding: '8px 12px',
                             borderRadius: '10px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
+                            display: 'grid',
+                            gridTemplateColumns: '1.2fr 1fr 1.1fr',
+                            gap: '6px',
                             alignItems: 'center',
                             fontSize: '12px'
                           }}
                         >
-                          <span style={{ fontWeight: '900', color: 'var(--text-main)' }}>
+                          <span style={{ fontWeight: '900', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {b.label || `دفعة #${i + 1}`}
                           </span>
-                          <span style={{ color: 'var(--green)', fontWeight: '900' }}>
+                          <span style={{ color: 'var(--green)', fontWeight: '900', textAlign: 'center', whiteSpace: 'nowrap' }}>
                             متبقي: ${b.remainingUSD}
                           </span>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             (شراء: {b.costPrice} {b.costCurrency})
                           </span>
                         </div>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import './styles/theme.css';
 import LoginScreen from './components/LoginScreen';
 import RechargeHub from './components/RechargeHub';
@@ -37,10 +38,10 @@ import {
 const OP_TYPE_META = {
   card_purchase: { label: 'شراء كارت', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.14)' },
   days_year: { label: 'دورة سنة أيام', color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.14)' },
-  ushare: { label: 'U-Share', color: '#FF7A00', bg: 'rgba(255, 122, 0, 0.14)' },
-  alfa_gift: { label: 'Alfa Gift', color: '#EC4899', bg: 'rgba(236, 72, 153, 0.14)' },
-  recharge_sale: { label: 'بيع رصيد', color: '#10B981', bg: 'rgba(16, 185, 129, 0.14)' },
-  wallet_sale: { label: 'مبيع محفظة', color: '#10B981', bg: 'rgba(16, 185, 129, 0.14)' },
+  ushare: { label: 'U-Share', color: '#2563EB', bg: 'rgba(37, 99, 235, 0.14)' },
+  alfa_gift: { label: 'Alfa Gift', color: '#059669', bg: 'rgba(5, 150, 105, 0.14)' },
+  recharge_sale: { label: 'بيع رصيد', color: '#D97706', bg: 'rgba(217, 119, 6, 0.14)' },
+  wallet_sale: { label: 'مبيع محفظة', color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.14)' },
   wallet_deposit: { label: 'إيداع محفظة', color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.14)' },
   wallet_withdrawal: { label: 'سحب محفظة', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.14)' },
   wallet_transfer: { label: 'تحويل محافظ', color: '#06B6D4', bg: 'rgba(6, 182, 212, 0.14)' },
@@ -92,6 +93,13 @@ export default function App() {
   }, [darkMode]);
 
   const toggleTheme = () => setDarkMode(!darkMode);
+
+  // <main> هو منطقة التمرير الوحيدة في التطبيق؛ نُصفِّر موضع التمرير عند كل تبديل تبويب
+  // حتى لا ينتقل المستخدم لتبويب جديد وهو في وسط/آخر الصفحة السابقة
+  const mainRef = useRef(null);
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }, [currentTab]);
 
   const [brandConfig, setBrandConfig] = useState(() => {
     const saved = localStorage.getItem('tb_brand_config');
@@ -576,7 +584,21 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg-main)', color: 'var(--text-main)', paddingBottom: 'calc(var(--total-nav-height) + 24px)' }}>
+    <div
+      className="app-shell"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100dvh',
+        width: '100%',
+        maxWidth: '440px',
+        margin: '0 auto',
+        overflow: 'hidden',
+        position: 'relative',
+        background: 'var(--bg-main)',
+        color: 'var(--text-main)'
+      }}
+    >
 
       {showSplash && (
         <SplashScreen
@@ -599,8 +621,11 @@ export default function App() {
         />
       )}
 
-      {/* هيدر النظام */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 90, background: 'var(--bg-card)', borderBottom: '1px solid var(--border-color)', backdropFilter: 'blur(12px)' }}>
+      {/* هيدر النظام: عنصر flex عادي ثابت الموضع (flex-shrink: 0) لا يتمرَّر أبداً ولا يتزحزح */}
+      <div
+        className="app-header"
+        style={{ flexShrink: 0, background: 'var(--bg-card)', borderBottom: '1px solid var(--border-color)', backdropFilter: 'blur(12px)' }}
+      >
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -789,7 +814,18 @@ export default function App() {
         </div>
       </div>
 
-      <main className="animate-tab-enter" style={{ padding: '14px', maxWidth: '440px', margin: '0 auto' }}>
+      <main
+        ref={mainRef}
+        className="animate-tab-enter"
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          padding: '14px',
+          paddingBottom: 'calc(92px + var(--safe-bottom))'
+        }}
+      >
         <ExpiryAlertBanner lines={lines} onNavigate={(tab) => setCurrentTab(tab)} />
 
         {currentTab === 'home' && (
@@ -1026,6 +1062,7 @@ export default function App() {
             onDeleteLine={handleDeleteLine}
             onRecordSaleFromLine={handleRecordSaleFromLine}
             onRefreshLines={loadDataFromServer}
+            brandConfig={brandConfig}
             exchangeRate={exchangeRate}
           />
         )}
@@ -1068,11 +1105,16 @@ export default function App() {
         <DeveloperFooter />
       </main>
 
-      <BottomNav
-        currentTab={currentTab}
-        onSelectTab={(tab) => setCurrentTab(tab)}
-        unreadDebtsCount={unreadDebtsCount}
-      />
+      {/* يُركَّب مباشرة على document.body عبر Portal حتى لا يبقى تابعاً لأي أصل في القوقعة
+          قد يُضاف له transform/animation مستقبلاً فيكسر موضعه الثابت (الصواب في Chrome) */}
+      {createPortal(
+        <BottomNav
+          currentTab={currentTab}
+          onSelectTab={(tab) => setCurrentTab(tab)}
+          unreadDebtsCount={unreadDebtsCount}
+        />,
+        document.body
+      )}
 
       <SettingsModal
         isOpen={showSettingsModal}

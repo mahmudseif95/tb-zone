@@ -195,13 +195,14 @@ export default function HomeDashboard({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', textAlign: 'center' }}>
           <div style={{ background: 'var(--bg-card-sub)', padding: '12px', borderRadius: '14px', border: '1px solid var(--border-color)' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>رصيد الدولار الكاش ($)</div>
-            <div style={{ fontSize: '22px', fontWeight: '900', color: 'var(--orange-primary)', marginTop: '4px' }}>
+            {/* key = القيمة المعروضة: يُعيد تركيب العنصر عند تغيّرها فيُشغَّل value-flash تلقائياً دون أي حالة JS إضافية */}
+            <div key={totalActualUSD.toFixed(2)} className="value-flash" style={{ fontSize: '22px', fontWeight: '900', color: 'var(--orange-primary)', marginTop: '4px' }}>
               ${totalActualUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
           </div>
           <div style={{ background: 'var(--bg-card-sub)', padding: '12px', borderRadius: '14px', border: '1px solid var(--border-color)' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>رصيد الليرة الكاش (LBP)</div>
-            <div style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-main)', marginTop: '6px' }}>
+            <div key={Math.round(totalActualLBP)} className="value-flash" style={{ fontSize: '18px', fontWeight: '900', color: 'var(--text-main)', marginTop: '6px' }}>
               {Math.round(totalActualLBP).toLocaleString()} <span style={{ fontSize: '11px', color: 'var(--orange-primary)' }}>ل.ل</span>
             </div>
           </div>
@@ -213,7 +214,7 @@ export default function HomeDashboard({
         <div
           onClick={() => onNavigate && onNavigate('analytics')}
           className="tz-card"
-          style={{ padding: '14px', textAlign: 'center', cursor: 'pointer' }}
+          style={{ padding: '14px', textAlign: 'center', cursor: 'pointer', minHeight: '82px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 'bold' }}>
             <TrendingUp size={14} color="var(--green)" />
@@ -227,7 +228,7 @@ export default function HomeDashboard({
         <div
           onClick={() => onNavigate && onNavigate('debts')}
           className="tz-card"
-          style={{ padding: '14px', textAlign: 'center', cursor: 'pointer' }}
+          style={{ padding: '14px', textAlign: 'center', cursor: 'pointer', minHeight: '82px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 'bold' }}>
             <AlertCircle size={14} color="var(--red)" />

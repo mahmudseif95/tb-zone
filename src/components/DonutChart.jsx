@@ -50,6 +50,16 @@ export default function DonutChart({ sources = [] }) {
 
   const currentDisplay = activeIndex !== null ? chartData[activeIndex] : null;
 
+  // قيمة مركز الحلقة الحالية + حجم خط متكيّف حسب عدد الخانات (يمنع تجاوز أرقام الليرة الكبيرة لحدود الحلقة)
+  const centerRawValue = chartCurrency === 'USD'
+    ? (currentDisplay ? currentDisplay.usdVal : totalAllUSD)
+    : (currentDisplay ? currentDisplay.lbpVal : totalAllLBP);
+  const centerNumberText = chartCurrency === 'USD'
+    ? centerRawValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : Math.round(centerRawValue).toLocaleString();
+  const centerFontSize = centerNumberText.length > 13 ? 13 : centerNumberText.length > 9 ? 15 : 18;
+  const centerColor = currentDisplay ? currentDisplay.color : 'var(--text-main)';
+
   return (
     <div style={{
       background: 'var(--bg-card)',
@@ -144,17 +154,42 @@ export default function DonutChart({ sources = [] }) {
             transform: 'translate(-50%, -50%)',
             textAlign: 'center',
             pointerEvents: 'none',
-            width: '140px'
+            width: '112px',
+            overflow: 'hidden'
           }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {currentDisplay ? currentDisplay.name : `إجمالي ${chartCurrency === 'USD' ? 'الدولار' : 'الليرة'}`}
             </div>
-            <div style={{ fontSize: '17px', fontWeight: '900', color: currentDisplay ? currentDisplay.color : 'var(--text-main)', marginTop: '2px' }}>
-              {chartCurrency === 'USD'
-                ? `$${(currentDisplay ? currentDisplay.usdVal : totalAllUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : `${Math.round(currentDisplay ? currentDisplay.lbpVal : totalAllLBP).toLocaleString()} ل.ل`}
+            {/* السطر الرقمي ورمز العملة على سطرين منفصلين دائماً حتى لا يتمدّد الرقم أفقياً خارج الحلقة */}
+            <div style={{ fontSize: `${centerFontSize}px`, fontWeight: '900', color: centerColor, marginTop: '2px', lineHeight: 1.15, wordBreak: 'break-all' }}>
+              {chartCurrency === 'USD' ? `$${centerNumberText}` : centerNumberText}
             </div>
+            {chartCurrency === 'LBP' && (
+              <div style={{ fontSize: '10px', fontWeight: '800', color: centerColor }}>ل.ل</div>
+            )}
           </div>
+        </div>
+      )}
+
+      {/* رقم الليرة الكامل بوضوح بلا أي اختصار، تحت الحلقة مباشرة (يمنع أي تصادم مع الحلقة البرتقالية) */}
+      {chartCurrency === 'LBP' && chartData.length > 0 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: 'var(--bg-card-sub)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '999px',
+          padding: '6px 16px',
+          fontSize: '13px',
+          fontWeight: '900',
+          color: 'var(--orange-primary)',
+          whiteSpace: 'nowrap'
+        }}>
+          <span style={{ color: 'var(--text-muted)', fontWeight: 'bold', fontSize: '11px' }}>
+            {currentDisplay ? `${currentDisplay.name}:` : 'الإجمالي:'}
+          </span>
+          <span>{Math.round(centerRawValue).toLocaleString()} ل.ل</span>
         </div>
       )}
 

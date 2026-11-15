@@ -1,18 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { WhatsAppSendersEditor } from './lines/WhatsAppActivationButton';
+import { api } from '../services/api';
 import {
   X,
   Store,
   Trash2,
   CheckCircle2,
-  Upload,
   Image as ImageIcon,
-  Cloud,
-  Download,
-  RefreshCw,
+  Upload,
   Lock,
   AlertTriangle,
-  Database,
+  UserCircle2,
+  Mail,
+  ShieldCheck,
   LogOut
 } from 'lucide-react';
 
@@ -24,17 +25,15 @@ export default function SettingsModal({
   onLogout,
   onResetAllData
 }) {
-  const [activeTab, setActiveTab] = useState('brand'); // 'brand' | 'backup'
-  const fileInputRef = useRef(null);
+  const [activeTab, setActiveTab] = useState('brand'); // 'brand' | 'account'
 
   const [name, setName] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [phone, setPhone] = useState('');
   const [logo, setLogo] = useState('');
 
-  // حالة المزامنة السحابية
-  const [cloudSyncStatus, setCloudSyncStatus] = useState('');
-  const [lastSyncTime, setLastSyncTime] = useState(() => localStorage.getItem('tb_last_cloud_sync') || 'لم تتم مزامنة بعد');
+  // بيانات الحساب (البريد) من السيرفر — تُجلَب مرة عند فتح المودال
+  const [accountEmail, setAccountEmail] = useState('');
 
   // نافذة تأكيد تصفير النظام برمز الأمان
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -49,6 +48,13 @@ export default function SettingsModal({
       setLogo(brandConfig.logo || '');
     }
   }, [brandConfig, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    api.getMe()
+      .then(res => setAccountEmail(res?.shop?.email || ''))
+      .catch(() => { });
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -77,78 +83,6 @@ export default function SettingsModal({
       logo: logo
     });
     alert('تم حفظ بيانات المحل واللوغو وتحديثها في السيرفر بنجاح!');
-  };
-
-  const getFullBackupObject = () => ({
-    version: '2.0',
-    exportDate: new Date().toISOString(),
-    brandConfig: JSON.parse(localStorage.getItem('tb_brand_config') || '{}'),
-    rate: localStorage.getItem('tb_rate') || '89500',
-    sims: JSON.parse(localStorage.getItem('tb_sims') || '[]'),
-    sources: JSON.parse(localStorage.getItem('tb_sources') || '[]'),
-    lines: JSON.parse(localStorage.getItem('tb_locked_lines') || '[]'),
-    debts: JSON.parse(localStorage.getItem('tb_debts') || '[]'),
-    customers: JSON.parse(localStorage.getItem('tb_customers') || '[]'),
-    expenses: JSON.parse(localStorage.getItem('tb_expenses') || '[]'),
-    salesHistory: JSON.parse(localStorage.getItem('tb_sales_history') || '[]')
-  });
-
-  const handleTriggerCloudSync = () => {
-    setCloudSyncStatus('syncing');
-    const backupData = getFullBackupObject();
-
-    setTimeout(() => {
-      const nowStr = new Date().toLocaleString('ar-LB');
-      localStorage.setItem('tb_cloud_vault_latest', JSON.stringify(backupData));
-      localStorage.setItem('tb_last_cloud_sync', nowStr);
-      setLastSyncTime(nowStr);
-      setCloudSyncStatus('done');
-      alert(`تمت المزامنة السحابية بنجاح وحفظ قاعدة بيانات المتجر (${nowStr})!`);
-    }, 600);
-  };
-
-  const handleExportBackup = () => {
-    const backupData = getFullBackupObject();
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ZOLFA_TECH_Backup_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportBackup = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target.result);
-        if (!data || typeof data !== 'object') throw new Error('ملف غير صالح');
-
-        if (window.confirm('هل أنت متأكد من استعادة هذه النسخة؟ سيتم استبدال البيانات الحالية ببيانات الملف.')) {
-          if (data.brandConfig) localStorage.setItem('tb_brand_config', JSON.stringify(data.brandConfig));
-          if (data.rate) localStorage.setItem('tb_rate', data.rate.toString());
-          if (data.sims) localStorage.setItem('tb_sims', JSON.stringify(data.sims));
-          if (data.sources) localStorage.setItem('tb_sources', JSON.stringify(data.sources));
-          if (data.lines) localStorage.setItem('tb_locked_lines', JSON.stringify(data.lines));
-          if (data.debts) localStorage.setItem('tb_debts', JSON.stringify(data.debts));
-          if (data.customers) localStorage.setItem('tb_customers', JSON.stringify(data.customers));
-          if (data.expenses) localStorage.setItem('tb_expenses', JSON.stringify(data.expenses));
-          if (data.salesHistory) localStorage.setItem('tb_sales_history', JSON.stringify(data.salesHistory));
-
-          alert('تمت استعادة النسخة بنجاح!');
-          window.location.reload();
-        }
-      } catch (err) {
-        alert('حدث خطأ أثناء قراءة الملف! تأكد من اختيار ملف صالح.');
-      }
-    };
-    reader.readAsText(file);
   };
 
   const handleConfirmReset = (e) => {
@@ -247,13 +181,13 @@ export default function SettingsModal({
 
           <button
             type="button"
-            onClick={() => setActiveTab('backup')}
+            onClick={() => setActiveTab('account')}
             style={{
               padding: '8px 4px',
               borderRadius: '8px',
               border: 'none',
-              background: activeTab === 'backup' ? 'var(--orange-primary)' : 'transparent',
-              color: activeTab === 'backup' ? '#fff' : 'var(--text-main)',
+              background: activeTab === 'account' ? 'var(--orange-primary)' : 'transparent',
+              color: activeTab === 'account' ? '#fff' : 'var(--text-main)',
               fontSize: '12px',
               fontWeight: 'bold',
               cursor: 'pointer',
@@ -263,8 +197,8 @@ export default function SettingsModal({
               gap: '6px'
             }}
           >
-            <Database size={15} />
-            <span>البيانات والنسخ</span>
+            <UserCircle2 size={15} />
+            <span>الحساب والخروج</span>
           </button>
         </div>
 
@@ -377,6 +311,11 @@ export default function SettingsModal({
               </div>
             </div>
 
+            <div style={{ background: 'var(--bg-card-sub)', border: '1px solid var(--border-color)', borderRadius: '14px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <span style={{ fontSize: '12px', fontWeight: '900', color: 'var(--orange-primary)' }}>حسابات واتساب (إرسال طريقة تفعيل U-Share 1323)</span>
+              <WhatsAppSendersEditor />
+            </div>
+
             <button type="submit" className="btn-primary" style={{ marginTop: '8px' }}>
               <CheckCircle2 size={16} />
               <span>حفظ بيانات المحل واللوغو</span>
@@ -384,70 +323,51 @@ export default function SettingsModal({
           </form>
         )}
 
-        {/* 2. البيانات والنسخ الاحتياطي والصيانة */}
-        {activeTab === 'backup' && (
+        {/* 2. الحساب والخروج */}
+        {activeTab === 'account' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-            {/* المزامنة السحابية */}
-            <div style={{ background: 'var(--bg-card-sub)', padding: '14px', borderRadius: '16px', border: '1.5px solid var(--orange-primary)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Cloud size={18} color="var(--orange-primary)" />
-                  <span style={{ fontSize: '13px', fontWeight: '900', color: 'var(--orange-primary)' }}>المزامنة السحابية (Cloud Vault)</span>
+            {/* بطاقة معلومات الحساب */}
+            <div style={{ background: 'var(--bg-card-sub)', padding: '14px', borderRadius: '16px', border: '1.5px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'var(--orange-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <UserCircle2 size={24} color="var(--orange-primary)" />
                 </div>
-                <span style={{ fontSize: '10px', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--green)', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
-                  جاهز ✓
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '14px', fontWeight: '900', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {brandConfig?.name || 'المحل'}
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>اسم المحل</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                <Mail size={14} color="var(--orange-primary)" style={{ flexShrink: 0 }} />
+                <span dir="ltr" style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {accountEmail || '—'}
                 </span>
               </div>
-              <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                حفظ نسخة احتياطية مشفرة لبيانات العمليات والديون والأرصدة على السيرفر السحابي.
-              </p>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                آخر مزامنة: <b>{lastSyncTime}</b>
-              </div>
 
-              <button
-                type="button"
-                onClick={handleTriggerCloudSync}
-                className="btn-primary"
-                style={{ height: '42px', fontSize: '12px', marginTop: '4px' }}
-              >
-                <RefreshCw size={15} />
-                <span>مزامنة سحابية فورية الآن</span>
-              </button>
-            </div>
-
-            {/* تصدير / استرجاع ملف محلي */}
-            <div style={{ background: 'var(--bg-card-sub)', padding: '12px', borderRadius: '14px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>تصدير واسترجاع ملف قاعدة البيانات:</span>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                <button
-                  type="button"
-                  onClick={handleExportBackup}
-                  className="tz-input"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', height: '40px' }}
-                >
-                  <Download size={14} color="var(--orange-primary)" />
-                  <span>تصدير ملف</span>
-                </button>
-
-                <label
-                  className="tz-input"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px', height: '40px' }}
-                >
-                  <Upload size={14} color="var(--green)" />
-                  <span>استرجاع ملف</span>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".json"
-                    style={{ display: 'none' }}
-                    onChange={handleImportBackup}
-                  />
-                </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                <ShieldCheck size={14} color="var(--green)" style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-main)' }}>مالك المحل (صلاحية كاملة)</span>
               </div>
             </div>
+
+            {/* زر تسجيل الخروج */}
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('هل تريد بالتأكيد تسجيل الخروج من هذا الحساب؟')) {
+                  if (onLogout) onLogout();
+                }
+              }}
+              className="btn-primary"
+              style={{ height: '44px', fontSize: '12px' }}
+            >
+              <LogOut size={16} />
+              <span>تسجيل الخروج من الحساب</span>
+            </button>
 
             {/* تصفير البيانات بحماية رمز المرور */}
             <div style={{ marginTop: '4px' }}>
@@ -481,37 +401,6 @@ export default function SettingsModal({
 
           </div>
         )}
-
-        {/* زر تسجيل الخروج الثابت بالأسفل */}
-        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm('هل تريد بالتأكيد تسجيل الخروج من هذا الحساب؟')) {
-                if (onLogout) onLogout();
-              }
-            }}
-            style={{
-              width: '100%',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid var(--border-color)',
-              color: 'var(--text-main)',
-              borderRadius: '12px',
-              padding: '10px',
-              fontSize: '12px',
-              fontWeight: '900',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <LogOut size={15} color="var(--orange-primary)" />
-            <span>تسجيل الخروج من الحساب</span>
-          </button>
-        </div>
 
       </div>
 

@@ -236,23 +236,30 @@ export default function Customers({
                 style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 14px', position: 'relative', cursor: 'pointer' }}
                 onClick={() => setViewingCustomer(cust)}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '15px', fontWeight: '900', color: 'var(--orange-primary)' }}>{cust.name}</span>
-                      {unpaidDebtUSD > 0 && (
-                        <span style={{ fontSize: '10px', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--red)', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
-                          عليه دين: ${unpaidDebtUSD.toFixed(2)}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    {/* الاسم والهاتف أولاً بسطر نظيف واحد */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '15px', fontWeight: '900', color: 'var(--orange-primary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cust.name}</span>
+                      {cust.phone && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                            <Phone size={11} color="var(--orange-primary)" /> {cust.phone}
                         </span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', gap: '10px', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      {cust.phone && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Phone size={11} color="var(--orange-primary)" /> {cust.phone}</span>}
-                      {cust.address && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><MapPin size={11} color="var(--orange-primary)" /> {cust.address}</span>}
-                    </div>
+                    {(cust.address || unpaidDebtUSD > 0) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', flexWrap: 'wrap' }}>
+                        {cust.address && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><MapPin size={11} color="var(--orange-primary)" /> {cust.address}</span>}
+                        {unpaidDebtUSD > 0 && (
+                          <span style={{ fontSize: '10px', whiteSpace: 'nowrap', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--red)', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
+                            عليه دين: ${unpaidDebtUSD.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                     <button
                       type="button"
                       onClick={() => triggerDirectPrint(cust)}
@@ -261,13 +268,16 @@ export default function Customers({
                         border: '1px solid var(--orange-primary)',
                         color: 'var(--orange-primary)',
                         borderRadius: '8px',
-                        padding: '6px 10px',
+                        height: '30px',
+                        padding: '0 10px',
                         display: 'flex',
                         alignItems: 'center',
+                        justifyContent: 'center',
                         gap: '4px',
                         cursor: 'pointer',
                         fontSize: '11px',
-                        fontWeight: '800'
+                        fontWeight: '800',
+                        whiteSpace: 'nowrap'
                       }}
                       title="طباعة كشف الحساب"
                     >
@@ -285,9 +295,14 @@ export default function Customers({
                         background: 'var(--bg-card-sub)',
                         border: '1px solid var(--border-color)',
                         borderRadius: '8px',
-                        padding: '6px',
+                        width: '30px',
+                        height: '30px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                         color: 'var(--text-main)',
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        flexShrink: 0
                       }}
                     >
                       <MoreVertical size={15} />
@@ -350,17 +365,17 @@ export default function Customers({
                 </div>
 
                 <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '6px',
                   background: 'var(--bg-card-sub)',
                   padding: '6px 10px',
                   borderRadius: '10px',
                   fontSize: '11px',
                   borderTop: '1px solid var(--border-color)'
                 }}>
-                  <span>المشتريات: <b>${totalSalesUSD.toFixed(2)}</b> ({txs.length} حركة)</span>
-                  <span style={{ color: 'var(--green)', fontWeight: 'bold' }}>صافي ربحك: <b>+${netProfitUSD.toFixed(2)}</b></span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>المشتريات: <b>${totalSalesUSD.toFixed(2)}</b> ({txs.length} حركة)</span>
+                  <span style={{ color: 'var(--green)', fontWeight: 'bold', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>صافي ربحك: <b>+${netProfitUSD.toFixed(2)}</b></span>
                 </div>
               </div>
             );
